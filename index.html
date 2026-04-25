@@ -3,144 +3,237 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>云端收藏夹 Bookmark Hub</title>
-  <meta name="description" content="一个基于 GitHub Pages + Supabase 的实时同步个人收藏夹网站。" />
-  <link rel="stylesheet" href="./style.css" />
+  <title>Bookmark Hub</title>
+  <meta name="description" content="Bookmark Hub" />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
+
 <body>
-  <div class="bg-orb bg-orb-1"></div>
-  <div class="bg-orb bg-orb-2"></div>
+  <div id="themeOverlay" class="theme-overlay"></div>
 
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo">⌘</div>
-      <div>
-        <h1>云端收藏夹</h1>
-        <p>GitHub Pages + Supabase 实时同步</p>
-      </div>
-    </div>
+  <div class="page-wrap">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M7 4.5c0-.83.67-1.5 1.5-1.5h7A1.5 1.5 0 0 1 17 4.5V21l-5-3-5 3V4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+            </div>
 
-    <div class="top-actions">
-      <button id="themeToggle" class="ghost-btn" type="button" title="切换深色模式">🌙</button>
-      <button id="loginOpenBtn" class="primary-btn" type="button">管理员登录</button>
-      <button id="logoutBtn" class="ghost-btn hidden" type="button">退出</button>
-    </div>
-  </header>
+            <div class="brand-text">
+              <h1 id="brandTitle"></h1>
+              <p id="brandSubtitle"></p>
+            </div>
+          </div>
 
-  <main class="shell">
-    <section id="setupNotice" class="notice hidden">
-      <strong>还没有配置 Supabase。</strong>
-      打开 <code>app.js</code>，替换 <code>SUPABASE_URL</code>、<code>SUPABASE_ANON_KEY</code>、<code>ADMIN_EMAIL</code> 后再部署。
-    </section>
-
-    <section class="hero">
-      <div>
-        <div class="eyebrow">Realtime Bookmark Site</div>
-        <h2>把常用网站整理成一个漂亮、实时同步的收藏夹。</h2>
-        <p>访客可以浏览、搜索和分类查看；管理员登录后可以新增、编辑、删除，其他人会实时看到更新。</p>
-      </div>
-      <div class="hero-card">
-        <span id="realtimeDot" class="status-dot"></span>
-        <div>
-          <strong id="syncStatus">正在连接...</strong>
-          <p id="statsText">加载收藏中</p>
+          <div class="sidebar-section-head">
+            <span id="sidebarGroupTitle"></span>
+            <button id="addCategoryBtn" class="add-category-btn hidden" type="button">＋</button>
+          </div>
         </div>
-      </div>
-    </section>
 
-    <section class="toolbar">
-      <div class="search-wrap">
-        <span>⌕</span>
-        <input id="searchInput" type="search" placeholder="搜索标题、描述、分类或标签..." autocomplete="off" />
-      </div>
-      <select id="categorySelect" aria-label="选择分类">
-        <option value="全部">全部分类</option>
-      </select>
-      <button id="addOpenBtn" class="primary-btn hidden" type="button">新增收藏</button>
-    </section>
+        <div id="groupList" class="group-list"></div>
 
-    <section id="categoryPills" class="pills" aria-label="分类筛选"></section>
+        <div class="sidebar-foot">
+          <div id="sidebarLottieWrap" class="lottie-card hidden">
+            <div id="sidebarLottie" class="lottie-box"></div>
+          </div>
 
-    <section id="emptyState" class="empty hidden">
-      <div>🫧</div>
-      <h3>暂无收藏</h3>
-      <p>管理员登录后可以添加第一条收藏。</p>
-    </section>
+          <div class="tip-card">
+            <strong id="sidebarTipTitle"></strong>
+            <p id="sidebarTipDesc"></p>
+          </div>
+        </div>
+      </aside>
 
-    <section id="bookmarkGrid" class="grid"></section>
-  </main>
+      <main class="main">
+        <header class="topbar">
+          <div class="page-title">
+            <h2 id="currentTitle"></h2>
+            <p id="currentSubtitle"></p>
+          </div>
+
+          <div class="top-actions">
+            <div class="badge">
+              <span id="realtimeDot" class="dot"></span>
+              <span id="syncStatus"></span>
+            </div>
+
+            <div id="adminBadge" class="badge admin-badge hidden"></div>
+
+            <button id="textOpenBtn" class="ghost-btn hidden" type="button"></button>
+
+            <button id="themeToggle" class="theme-btn" type="button" aria-label="切换主题">
+              <span class="theme-knob">
+                <span class="theme-sun">☀️</span>
+                <span class="theme-moon">🌙</span>
+              </span>
+            </button>
+
+            <button id="loginOpenBtn" class="ghost-btn" type="button"></button>
+            <button id="logoutBtn" class="ghost-btn hidden" type="button"></button>
+          </div>
+        </header>
+
+        <div id="setupNotice" class="notice hidden">
+          <strong id="setupNoticeTitle"></strong>
+          <span id="setupNoticeDesc"></span>
+        </div>
+
+        <section class="experience-strip">
+          <div class="intro-card">
+            <div class="intro-copy">
+              <strong id="introTitle"></strong>
+              <span id="introDesc"></span>
+            </div>
+
+            <div id="introLottieWrap" class="intro-lottie-wrap hidden" aria-hidden="true">
+              <div id="introLottie" class="lottie-box"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="toolbar">
+          <label id="searchShell" class="search-shell">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none">
+              <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+
+            <input id="searchInput" type="search" autocomplete="off" />
+            <span id="searchFeedback" class="search-feedback"></span>
+          </label>
+
+          <button id="addOpenBtn" class="primary-btn hidden" type="button"></button>
+        </section>
+
+        <section class="content-area">
+          <section id="emptyState" class="empty-state hidden">
+            <div id="emptyLottieWrap" class="empty-lottie-wrap hidden" aria-hidden="true">
+              <div id="emptyLottie" class="lottie-box"></div>
+            </div>
+
+            <h3 id="emptyTitle"></h3>
+            <p id="emptyDesc"></p>
+          </section>
+
+          <section id="bookmarkGrid" class="grid"></section>
+        </section>
+      </main>
+    </div>
+  </div>
 
   <dialog id="loginDialog" class="dialog">
     <form id="loginForm" method="dialog" class="dialog-card">
       <div class="dialog-head">
         <div>
-          <h3>管理员登录</h3>
-          <p>使用你在 Supabase Auth 创建的管理员账号登录。</p>
+          <h3 id="loginDialogTitle"></h3>
+          <p id="loginDialogDesc"></p>
         </div>
-        <button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
       </div>
 
-      <label>
-        邮箱
-        <input id="loginEmail" type="email" placeholder="you@example.com" required />
+      <label class="field">
+        <span id="loginEmailLabel"></span>
+        <input id="loginEmail" type="email" required />
       </label>
 
-      <label>
-        密码
-        <input id="loginPassword" type="password" placeholder="请输入密码" required />
+      <label class="field">
+        <span id="loginPasswordLabel"></span>
+        <input id="loginPassword" type="password" required />
       </label>
-
-      <p class="hint">注意：真正的权限由 Supabase RLS 控制，不要在前端放 service_role key。</p>
 
       <div class="dialog-actions">
-        <button type="button" class="ghost-btn" data-close-dialog>取消</button>
-        <button type="submit" class="primary-btn">登录</button>
+        <button id="loginCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
+        <button id="loginSubmitBtn" class="primary-btn" type="submit"></button>
       </div>
     </form>
   </dialog>
 
   <dialog id="bookmarkDialog" class="dialog">
-    <form id="bookmarkForm" method="dialog" class="dialog-card wide">
+    <form id="bookmarkForm" method="dialog" class="dialog-card">
       <div class="dialog-head">
         <div>
-          <h3 id="formTitle">新增收藏</h3>
-          <p>添加后，其他打开网站的人会实时看到。</p>
+          <h3 id="formTitle"></h3>
+          <p id="bookmarkFormDesc"></p>
         </div>
-        <button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
       </div>
 
       <input id="bookmarkId" type="hidden" />
 
-      <div class="form-grid">
-        <label>
-          标题
-          <input id="titleInput" type="text" placeholder="例如：ChatGPT" required maxlength="80" />
-        </label>
-
-        <label>
-          分类
-          <input id="categoryInput" type="text" placeholder="例如：AI 工具" required maxlength="40" />
-        </label>
-      </div>
-
-      <label>
-        链接
-        <input id="urlInput" type="url" placeholder="https://example.com" required />
+      <label class="field">
+        <span id="bookmarkNameLabel"></span>
+        <input id="titleInput" type="text" required maxlength="80" />
       </label>
 
-      <label>
-        描述
-        <textarea id="descriptionInput" placeholder="简单介绍这个网站的用途..." maxlength="240"></textarea>
+      <label class="field">
+        <span id="bookmarkUrlLabel"></span>
+        <input id="urlInput" type="url" required />
       </label>
 
-      <label>
-        标签
-        <input id="tagsInput" type="text" placeholder="用逗号分隔，例如：AI, 效率, 写作" />
+      <label class="field">
+        <span id="bookmarkDescLabel"></span>
+        <textarea id="descriptionInput" maxlength="240"></textarea>
+      </label>
+
+      <label class="field">
+        <span id="bookmarkCategoryLabel"></span>
+        <select id="categoryInput" required></select>
       </label>
 
       <div class="dialog-actions">
-        <button type="button" class="ghost-btn" data-close-dialog>取消</button>
-        <button type="submit" class="primary-btn">保存</button>
+        <button id="bookmarkCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
+        <button id="bookmarkSaveBtn" class="primary-btn" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="categoryDialog" class="dialog">
+    <form id="categoryForm" method="dialog" class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <h3 id="categoryFormTitle"></h3>
+          <p id="categoryFormDesc"></p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <input id="categoryIdInput" type="hidden" />
+      <input id="categoryOldNameInput" type="hidden" />
+
+      <label class="field">
+        <span id="categoryNameLabel"></span>
+        <input id="categoryNameInput" type="text" required maxlength="40" />
+      </label>
+
+      <div class="dialog-actions">
+        <button id="categoryCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
+        <button id="categorySaveBtn" class="primary-btn" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="textDialog" class="dialog text-dialog">
+    <form id="textForm" method="dialog" class="dialog-card text-dialog-card">
+      <div class="dialog-head">
+        <div>
+          <h3 id="textFormTitle"></h3>
+          <p id="textFormDesc"></p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <div id="textList" class="text-list"></div>
+
+      <div class="dialog-actions">
+        <button id="textCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
+        <button id="textSaveBtn" class="primary-btn" type="submit"></button>
       </div>
     </form>
   </dialog>
