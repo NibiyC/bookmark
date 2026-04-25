@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>云端收藏夹 Bookmark Hub</title>
+  <meta name="description" content="一个基于 GitHub Pages + Supabase 的实时同步个人收藏夹网站。" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">⌘</div>
+      <div>
+        <h1>云端收藏夹</h1>
+        <p>GitHub Pages + Supabase 实时同步</p>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <button id="themeToggle" class="ghost-btn" type="button" title="切换深色模式">🌙</button>
+      <button id="loginOpenBtn" class="primary-btn" type="button">管理员登录</button>
+      <button id="logoutBtn" class="ghost-btn hidden" type="button">退出</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section id="setupNotice" class="notice hidden">
+      <strong>还没有配置 Supabase。</strong>
+      打开 <code>app.js</code>，替换 <code>SUPABASE_URL</code>、<code>SUPABASE_ANON_KEY</code>、<code>ADMIN_EMAIL</code> 后再部署。
+    </section>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Realtime Bookmark Site</div>
+        <h2>把常用网站整理成一个漂亮、实时同步的收藏夹。</h2>
+        <p>访客可以浏览、搜索和分类查看；管理员登录后可以新增、编辑、删除，其他人会实时看到更新。</p>
+      </div>
+      <div class="hero-card">
+        <span id="realtimeDot" class="status-dot"></span>
+        <div>
+          <strong id="syncStatus">正在连接...</strong>
+          <p id="statsText">加载收藏中</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div class="search-wrap">
+        <span>⌕</span>
+        <input id="searchInput" type="search" placeholder="搜索标题、描述、分类或标签..." autocomplete="off" />
+      </div>
+      <select id="categorySelect" aria-label="选择分类">
+        <option value="全部">全部分类</option>
+      </select>
+      <button id="addOpenBtn" class="primary-btn hidden" type="button">新增收藏</button>
+    </section>
+
+    <section id="categoryPills" class="pills" aria-label="分类筛选"></section>
+
+    <section id="emptyState" class="empty hidden">
+      <div>🫧</div>
+      <h3>暂无收藏</h3>
+      <p>管理员登录后可以添加第一条收藏。</p>
+    </section>
+
+    <section id="bookmarkGrid" class="grid"></section>
+  </main>
+
+  <dialog id="loginDialog" class="dialog">
+    <form id="loginForm" method="dialog" class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <h3>管理员登录</h3>
+          <p>使用你在 Supabase Auth 创建的管理员账号登录。</p>
+        </div>
+        <button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button>
+      </div>
+
+      <label>
+        邮箱
+        <input id="loginEmail" type="email" placeholder="you@example.com" required />
+      </label>
+
+      <label>
+        密码
+        <input id="loginPassword" type="password" placeholder="请输入密码" required />
+      </label>
+
+      <p class="hint">注意：真正的权限由 Supabase RLS 控制，不要在前端放 service_role key。</p>
+
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn" data-close-dialog>取消</button>
+        <button type="submit" class="primary-btn">登录</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookmarkDialog" class="dialog">
+    <form id="bookmarkForm" method="dialog" class="dialog-card wide">
+      <div class="dialog-head">
+        <div>
+          <h3 id="formTitle">新增收藏</h3>
+          <p>添加后，其他打开网站的人会实时看到。</p>
+        </div>
+        <button class="icon-btn" value="cancel" type="button" data-close-dialog>×</button>
+      </div>
+
+      <input id="bookmarkId" type="hidden" />
+
+      <div class="form-grid">
+        <label>
+          标题
+          <input id="titleInput" type="text" placeholder="例如：ChatGPT" required maxlength="80" />
+        </label>
+
+        <label>
+          分类
+          <input id="categoryInput" type="text" placeholder="例如：AI 工具" required maxlength="40" />
+        </label>
+      </div>
+
+      <label>
+        链接
+        <input id="urlInput" type="url" placeholder="https://example.com" required />
+      </label>
+
+      <label>
+        描述
+        <textarea id="descriptionInput" placeholder="简单介绍这个网站的用途..." maxlength="240"></textarea>
+      </label>
+
+      <label>
+        标签
+        <input id="tagsInput" type="text" placeholder="用逗号分隔，例如：AI, 效率, 写作" />
+      </label>
+
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn" data-close-dialog>取消</button>
+        <button type="submit" class="primary-btn">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
