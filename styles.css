@@ -1323,17 +1323,50 @@ select {
   width: 40px;
   height: 40px;
   object-fit: contain;
+  display: none;
+  opacity: 0;
+  transform: scale(.9);
+  transition:
+    opacity .22s var(--ease),
+    transform .28s var(--spring);
+}
+
+.card-logo.has-icon img {
+  display: block;
+  opacity: 1;
+  transform: scale(1);
 }
 
 .card-logo > span {
   display: none;
-  font-size: 24px;
-  font-weight: 820;
+  max-width: 48px;
+  padding: 0 3px;
+  overflow: hidden;
   color: var(--accent);
+  font-size: 24px;
+  font-weight: 860;
+  line-height: 1;
+  letter-spacing: -.04em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-logo.is-short-logo > span {
+  font-size: 21px;
+}
+
+.card-logo.is-word-logo > span {
+  font-size: 15px;
+  letter-spacing: -.02em;
 }
 
 .card-logo.is-fallback > span {
   display: block;
+}
+
+.card-logo.has-icon > span {
+  display: none;
 }
 
 .card-title-wrap {
@@ -2976,4 +3009,335 @@ body.render-quiet .card {
 body.render-quiet .card,
 body.render-quiet .card * {
   transition-duration: 0.01ms !important;
+}
+
+
+/* Desktop: keep the left group sidebar globally fixed while the main page scrolls. */
+@media (min-width: 1121px) {
+  .page-wrap {
+    --fixed-sidebar-width: 300px;
+    --fixed-page-gutter: clamp(12px, 2vw, 28px);
+  }
+
+  .layout {
+    grid-template-columns: var(--fixed-sidebar-width) minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 40;
+    top: var(--fixed-page-gutter);
+    left: max(var(--fixed-page-gutter), calc((100vw - 1780px) / 2));
+    width: var(--fixed-sidebar-width);
+    height: calc(100dvh - clamp(24px, 4vw, 56px));
+  }
+
+  .main {
+    grid-column: 2;
+    min-width: 0;
+  }
+}
+
+
+/* ===== Current patch: favicon 2s fallback + truly fixed desktop panels ===== */
+/* 图标逻辑：优先加载网站 favicon；2 秒内未成功才显示书签名首字 */
+.card-logo {
+  position: relative;
+}
+
+.card-logo img.card-favicon {
+  display: block !important;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  opacity: 0;
+  transform: scale(.92);
+  transition:
+    opacity .22s var(--ease),
+    transform .28s var(--spring),
+    filter .28s var(--ease);
+}
+
+.card-logo.has-icon img.card-favicon {
+  display: block !important;
+  opacity: 1;
+  transform: scale(1);
+}
+
+.card-logo.is-fallback img.card-favicon {
+  display: none !important;
+}
+
+.card-logo.is-loading > span,
+.card-logo.has-icon > span {
+  display: none !important;
+}
+
+.card-logo.is-fallback > span {
+  display: block !important;
+}
+
+/* 加载 favicon 的 2 秒内显示一个很轻的等待状态，不抢图标位置 */
+.card-logo.is-loading {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.94), rgba(255,248,238,.7));
+}
+
+.card-logo.is-loading::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(154, 120, 255, .18);
+  border-top-color: rgba(154, 120, 255, .7);
+  animation: favicon-loading-spin .72s linear infinite;
+}
+
+.card-logo.has-icon::after,
+.card-logo.is-fallback::after {
+  content: none;
+}
+
+[data-theme="dark"] .card-logo.is-loading {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.05));
+}
+
+[data-theme="dark"] .card-logo.is-loading::after {
+  border-color: rgba(183, 164, 255, .18);
+  border-top-color: rgba(183, 164, 255, .78);
+}
+
+@keyframes favicon-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 桌面端：左侧分组栏、搜索栏、标题栏全部使用 fixed，全局固定在视口内 */
+@media (min-width: 1121px) {
+  .page-wrap {
+    --fixed-page-gutter: clamp(12px, 2vw, 28px);
+    --fixed-sidebar-width: 300px;
+    --fixed-layout-gap: clamp(18px, 2vw, 30px);
+    --fixed-layout-left: max(var(--fixed-page-gutter), calc((100vw - 1780px) / 2));
+    --fixed-layout-width: min(1780px, calc(100vw - var(--fixed-page-gutter) - var(--fixed-page-gutter)));
+    --fixed-main-left: calc(var(--fixed-layout-left) + var(--fixed-sidebar-width) + var(--fixed-layout-gap));
+    --fixed-main-width: calc(var(--fixed-layout-width) - var(--fixed-sidebar-width) - var(--fixed-layout-gap));
+    --fixed-topbar-height: 76px;
+    --fixed-fixed-gap: 18px;
+    --fixed-titlebar-height: 104px;
+  }
+
+  .layout {
+    grid-template-columns: var(--fixed-sidebar-width) minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed !important;
+    z-index: 80;
+    top: var(--fixed-page-gutter);
+    left: var(--fixed-layout-left);
+    width: var(--fixed-sidebar-width);
+    height: calc(100dvh - var(--fixed-page-gutter) - var(--fixed-page-gutter));
+  }
+
+  .main {
+    grid-column: 2;
+    min-width: 0;
+    padding-top: calc(
+      var(--fixed-topbar-height)
+      + var(--fixed-fixed-gap)
+      + var(--fixed-titlebar-height)
+      + 24px
+    );
+  }
+
+  .topbar {
+    position: fixed !important;
+    z-index: 120;
+    top: var(--fixed-page-gutter);
+    left: var(--fixed-main-left);
+    width: var(--fixed-main-width);
+    min-height: var(--fixed-topbar-height);
+    margin: 0;
+    transform: translateZ(0);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+  }
+
+  .titlebar {
+    position: fixed !important;
+    z-index: 110;
+    top: calc(var(--fixed-page-gutter) + var(--fixed-topbar-height) + var(--fixed-fixed-gap));
+    left: var(--fixed-main-left);
+    width: var(--fixed-main-width);
+    min-height: var(--fixed-titlebar-height);
+    margin: 0;
+    transform: translateZ(0);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+  }
+
+  .content-area {
+    scroll-margin-top: calc(
+      var(--fixed-topbar-height)
+      + var(--fixed-fixed-gap)
+      + var(--fixed-titlebar-height)
+      + 32px
+    );
+  }
+}
+
+/* 手机 / 平板端不固定顶部和侧边栏，避免遮挡内容 */
+@media (max-width: 1120px) {
+  .sidebar,
+  .topbar,
+  .titlebar {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: auto !important;
+    height: auto;
+  }
+
+  .main {
+    padding-top: clamp(6px, 1vw, 10px);
+  }
+}
+
+/* ===== Patch: fixed header shield to prevent bookmarks from scrolling through the fixed panels ===== */
+@media (min-width: 1121px) {
+  .page-wrap::after {
+    content: "";
+    position: fixed;
+    z-index: 105;
+    top: 0;
+    left: var(--fixed-main-left);
+    width: var(--fixed-main-width);
+    height: calc(
+      var(--fixed-page-gutter)
+      + var(--fixed-topbar-height)
+      + var(--fixed-fixed-gap)
+      + var(--fixed-titlebar-height)
+      + 28px
+    );
+    pointer-events: none;
+    background:
+      linear-gradient(180deg,
+        rgba(255, 247, 236, 0.98) 0%,
+        rgba(255, 251, 244, 0.97) 46%,
+        rgba(255, 253, 248, 0.94) 76%,
+        rgba(255, 253, 248, 0.82) 100%
+      );
+    backdrop-filter: blur(26px) saturate(1.12);
+    -webkit-backdrop-filter: blur(26px) saturate(1.12);
+    box-shadow: 0 18px 38px rgba(92, 66, 40, 0.055);
+  }
+
+  [data-theme="dark"] .page-wrap::after {
+    background:
+      radial-gradient(circle at 18% 18%, rgba(126, 169, 255, 0.12), transparent 36%),
+      radial-gradient(circle at 76% 26%, rgba(183, 164, 255, 0.13), transparent 40%),
+      linear-gradient(180deg,
+        rgba(8, 13, 27, 0.98) 0%,
+        rgba(11, 16, 32, 0.97) 48%,
+        rgba(14, 19, 38, 0.95) 78%,
+        rgba(14, 19, 38, 0.84) 100%
+      );
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+  }
+
+  .topbar {
+    z-index: 160 !important;
+    background:
+      linear-gradient(180deg, rgba(255, 253, 248, 0.96), rgba(255, 249, 241, 0.9)),
+      var(--surface-strong) !important;
+  }
+
+  .titlebar {
+    z-index: 150 !important;
+    background:
+      linear-gradient(135deg, rgba(255, 252, 246, 0.97), rgba(255, 247, 237, 0.91)),
+      var(--glass) !important;
+  }
+
+  [data-theme="dark"] .topbar {
+    background:
+      linear-gradient(180deg, rgba(21, 27, 49, 0.96), rgba(17, 23, 43, 0.92)),
+      var(--surface-strong) !important;
+  }
+
+  [data-theme="dark"] .titlebar {
+    background:
+      radial-gradient(circle at 12% 18%, rgba(126, 169, 255, 0.18), transparent 40%),
+      radial-gradient(circle at 78% 28%, rgba(183, 164, 255, 0.16), transparent 42%),
+      linear-gradient(135deg, rgba(33, 42, 73, 0.96), rgba(28, 23, 55, 0.92)),
+      var(--glass) !important;
+  }
+}
+
+@media (max-width: 1120px) {
+  .page-wrap::after {
+    content: none !important;
+  }
+}
+
+/* ===== Revert desktop fixed search/title panels =====
+   保留左侧分组栏桌面端固定；搜索框和标题栏恢复普通文档流，滚动时不再悬浮覆盖内容。 */
+@media (min-width: 1121px) {
+  .page-wrap::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  .main {
+    grid-column: 2;
+    min-width: 0;
+    padding: clamp(6px, 1vw, 10px) 0 0 !important;
+  }
+
+  .topbar {
+    position: relative !important;
+    z-index: 20 !important;
+    top: auto !important;
+    left: auto !important;
+    width: auto !important;
+    min-height: 76px;
+    margin: 0 !important;
+    transform: none !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(255, 251, 244, .48)),
+      var(--glass) !important;
+  }
+
+  .titlebar {
+    position: relative !important;
+    z-index: 1 !important;
+    top: auto !important;
+    left: auto !important;
+    width: auto !important;
+    min-height: 104px;
+    margin: 0 !important;
+    transform: none !important;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.72), rgba(255,247,235,.42)),
+      linear-gradient(115deg, rgba(255, 226, 204, .36), rgba(255, 215, 225, .28) 52%, rgba(233, 222, 255, .32)) !important;
+  }
+
+  [data-theme="dark"] .topbar {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .03)),
+      var(--glass) !important;
+  }
+
+  [data-theme="dark"] .titlebar {
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.028)),
+      linear-gradient(115deg, rgba(50, 72, 132, .34), rgba(78, 65, 105, .28) 52%, rgba(24, 28, 50, .3)) !important;
+  }
+
+  .content-area {
+    scroll-margin-top: 0 !important;
+  }
 }
