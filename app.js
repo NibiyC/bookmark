@@ -383,7 +383,10 @@ function normalizeUrl(url) {
 function getBookmarkIconUrl(url) {
   try {
     const parsed = new URL(normalizeUrl(url || ""));
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=128`;
+    const origin = `${parsed.protocol}//${parsed.hostname}`;
+
+    // 优先加载网站 favicon。只有图片加载失败时，才显示书签名称首字。
+    return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(origin)}&sz=128`;
   } catch {
     return "";
   }
@@ -399,7 +402,24 @@ function getBookmarkDomain(url) {
 }
 
 function getBookmarkInitial(title) {
-  return String(title || "?").trim().slice(0, 1).toUpperCase() || "?";
+  const value = String(title || "?").trim().replace(/\s+/g, " ");
+  if (!value) return "?";
+
+  const firstToken = value
+    .split(/[\s·•|｜/\\_—–-]+/u)
+    .find(Boolean) || value;
+  const tokenChars = Array.from(firstToken);
+
+  if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(firstToken)) {
+    return tokenChars[0] || "?";
+  }
+
+  const cleanToken = firstToken.replace(/[^\p{L}\p{N}]+/gu, "");
+  if (!cleanToken) {
+    return Array.from(value)[0]?.toUpperCase() || "?";
+  }
+
+  return Array.from(cleanToken).slice(0, 4).join("").toUpperCase();
 }
 
 function normalizeCategoryName(name) {
@@ -1015,6 +1035,7 @@ function renderCard(item, index) {
   const isHighlighted = highlightBookmarkId && String(item.id) === String(highlightBookmarkId);
   const iconUrl = getBookmarkIconUrl(item.url);
   const initial = getBookmarkInitial(item.title);
+  const logoTextClass = initial.length >= 3 ? "is-word-logo" : initial.length >= 2 ? "is-short-logo" : "";
   const domain = getBookmarkDomain(item.url);
   const bookmarkCategories = getBookmarkCategories(item);
   const visibleCategoryChips = bookmarkCategories.slice(0, 3);
@@ -1053,9 +1074,9 @@ function renderCard(item, index) {
       <div class="card-content">
         <span class="card-sheen" aria-hidden="true"></span>
         <div class="card-top">
-          <span class="card-logo ${iconUrl ? "" : "is-fallback"}" aria-hidden="true">
-            ${iconUrl ? `<img src="${escapeAttr(iconUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.classList.add('is-fallback'); this.remove();">` : ""}
-            <span>${escapeHtml(initial)}</span>
+          <span class="card-logo ${iconUrl ? "is-loading" : "is-fallback"} ${logoTextClass}" aria-hidden="true" ${iconUrl ? `data-icon-url="${escapeAttr(iconUrl)}"` : ""}>
+            ${iconUrl ? `<img class="card-favicon" src="${escapeAttr(iconUrl)}" alt="" decoding="async" referrerpolicy="no-referrer">` : ""}
+            <span class="card-logo-text">${escapeHtml(initial)}</span>
           </span>
           ${adminButtons}
         </div>
@@ -1166,6 +1187,60 @@ function render() {
   els.bookmarkGrid.innerHTML = filtered
     .map((item, index) => renderCard(item, index))
     .join("");
+
+  activateBookmarkIcons();
+}
+
+function activateBookmarkIcons() {
+  const images = els.bookmarkGrid.querySelectorAll(".card-logo img.card-favicon");
+
+  images.forEach((img) => {
+    const logo = img.closest(".card-logo");
+    if (!logo) return;
+
+    let settled = false;
+    let fallbackTimer = null;
+
+    const cleanup = () => {
+      settled = true;
+      clearTimeout(fallbackTimer);
+      img.removeEventListener("load", showIcon);
+      img.removeEventListener("error", showFallback);
+    };
+
+    const showIcon = () => {
+      if (settled) return;
+
+      if (!img.naturalWidth) {
+        showFallback();
+        return;
+      }
+
+      cleanup();
+      logo.classList.add("has-icon");
+      logo.classList.remove("is-fallback", "is-loading");
+    };
+
+    const showFallback = () => {
+      if (settled) return;
+
+      cleanup();
+      logo.classList.add("is-fallback");
+      logo.classList.remove("has-icon", "is-loading");
+      img.remove();
+    };
+
+    // 先给 favicon 2 秒加载窗口；超过 2 秒还没成功，就立刻回退为书签名首字。
+    fallbackTimer = setTimeout(showFallback, 2000);
+
+    if (img.complete) {
+      requestAnimationFrame(showIcon);
+      return;
+    }
+
+    img.addEventListener("load", showIcon);
+    img.addEventListener("error", showFallback);
+  });
 }
 
 function openBookmarkDialog(item = null) {
