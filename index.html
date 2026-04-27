@@ -30,7 +30,10 @@
 
           <div class="sidebar-section-head">
             <span id="sidebarGroupTitle"></span>
-            <button id="addCategoryBtn" class="add-category-btn hidden" type="button">＋</button>
+            <div class="sidebar-section-actions">
+              <button id="groupManageBtn" class="group-manage-btn hidden" type="button" aria-pressed="false">整理</button>
+              <button id="addCategoryBtn" class="add-category-btn hidden" type="button" aria-label="新增分组">＋</button>
+            </div>
           </div>
         </div>
 
@@ -50,39 +53,69 @@
 
       <main class="main">
         <header class="topbar">
+          <label id="searchShell" class="search-shell">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none">
+              <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+
+            <input id="searchInput" type="search" autocomplete="off" />
+            <span id="searchFeedback" class="search-feedback"></span>
+          </label>
+
+          <div class="top-actions">
+            <button id="addOpenBtn" class="primary-btn hidden" type="button"></button>
+
+            <div class="view-switch" aria-label="视图切换">
+              <button class="icon-btn is-active" type="button" data-view-mode="grid" aria-label="网格视图">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 5h5v5H5V5Zm9 0h5v5h-5V5ZM5 14h5v5H5v-5Zm9 0h5v5h-5v-5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <button class="icon-btn" type="button" data-view-mode="list" aria-label="列表视图">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M7 7h12M7 12h12M7 17h12M4.2 7h.1M4.2 12h.1M4.2 17h.1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+
+            <button id="themeToggle" class="icon-btn theme-btn" type="button" aria-label="切换主题">
+              <span class="theme-knob">
+                <svg class="theme-sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 4V2M12 22v-2M4.93 4.93 3.52 3.52M20.49 20.49l-1.42-1.42M4 12H2M22 12h-2M4.93 19.07l-1.41 1.42M20.49 3.51l-1.42 1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                <svg class="theme-moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20.5 14.7A7.8 7.8 0 0 1 9.3 3.5a8.6 8.6 0 1 0 11.2 11.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            </button>
+          </div>
+        </header>
+
+        <section class="titlebar">
           <div class="page-title">
             <h2 id="currentTitle"></h2>
             <p id="currentSubtitle"></p>
           </div>
 
-          <div class="top-actions">
+          <div class="title-actions">
             <div class="badge">
               <span id="realtimeDot" class="dot"></span>
               <span id="syncStatus"></span>
             </div>
 
             <div id="adminBadge" class="badge admin-badge hidden"></div>
-
             <button id="textOpenBtn" class="ghost-btn hidden" type="button"></button>
-
-            <button id="themeToggle" class="theme-btn" type="button" aria-label="切换主题">
-              <span class="theme-knob">
-                <span class="theme-sun">☀️</span>
-                <span class="theme-moon">🌙</span>
-              </span>
-            </button>
-
             <button id="loginOpenBtn" class="ghost-btn" type="button"></button>
             <button id="logoutBtn" class="ghost-btn hidden" type="button"></button>
           </div>
-        </header>
+        </section>
 
         <div id="setupNotice" class="notice hidden">
           <strong id="setupNoticeTitle"></strong>
           <span id="setupNoticeDesc"></span>
         </div>
 
-        <section class="experience-strip">
+        <section class="experience-strip" aria-hidden="true">
           <div class="intro-card">
             <div class="intro-copy">
               <strong id="introTitle"></strong>
@@ -93,19 +126,6 @@
               <div id="introLottie" class="lottie-box"></div>
             </div>
           </div>
-        </section>
-
-        <section class="toolbar">
-          <label id="searchShell" class="search-shell">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-
-            <input id="searchInput" type="search" autocomplete="off" />
-            <span id="searchFeedback" class="search-feedback"></span>
-          </label>
-
-          <button id="addOpenBtn" class="primary-btn hidden" type="button"></button>
         </section>
 
         <section class="content-area">
@@ -180,10 +200,11 @@
         <textarea id="descriptionInput" maxlength="240"></textarea>
       </label>
 
-      <label class="field">
+      <div class="field">
         <span id="bookmarkCategoryLabel"></span>
-        <select id="categoryInput" required></select>
-      </label>
+        <div id="categoryInput" class="category-check-list" role="group" aria-label="书签分组"></div>
+        <p class="field-hint">一个书签可以同时放进多个分组。</p>
+      </div>
 
       <div class="dialog-actions">
         <button id="bookmarkCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
