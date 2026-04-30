@@ -104,7 +104,11 @@
             </div>
 
             <div id="adminBadge" class="badge admin-badge hidden"></div>
+            <button id="batchToggleBtn" class="ghost-btn batch-toggle-btn hidden" type="button" aria-pressed="false">批量管理</button>
+            <button id="importExportBtn" class="ghost-btn hidden" type="button">导入导出</button>
+            <button id="trashOpenBtn" class="ghost-btn hidden" type="button">回收站</button>
             <button id="textOpenBtn" class="ghost-btn hidden" type="button"></button>
+            <button id="systemCheckBtn" class="ghost-btn subtle-admin-btn hidden" type="button">系统检查</button>
             <button id="loginOpenBtn" class="ghost-btn" type="button"></button>
             <button id="logoutBtn" class="ghost-btn hidden" type="button"></button>
           </div>
@@ -129,6 +133,26 @@
         </section>
 
         <section class="content-area">
+          <section id="batchToolbar" class="batch-toolbar hidden" aria-label="批量管理工具栏">
+            <div class="batch-toolbar-main">
+              <strong id="batchCount">已选择 0 个书签</strong>
+              <span>可批量添加分组、移除分组或删除书签。</span>
+            </div>
+            <div class="batch-toolbar-actions">
+              <button id="batchSelectVisibleBtn" class="ghost-btn compact-btn" type="button">选择当前分组</button>
+              <button id="batchClearBtn" class="ghost-btn compact-btn" type="button">清空选择</button>
+              <button id="batchExitBtn" class="ghost-btn compact-btn cancel-mode" type="button">取消批量</button>
+              <button id="batchAddGroupBtn" class="ghost-btn compact-btn" type="button">添加分组</button>
+              <button id="batchReplaceGroupBtn" class="ghost-btn compact-btn" type="button">替换分组</button>
+              <button id="batchRemoveGroupBtn" class="ghost-btn compact-btn" type="button">移除分组</button>
+              <button id="batchPinBtn" class="ghost-btn compact-btn" type="button">置顶</button>
+              <button id="batchUnpinBtn" class="ghost-btn compact-btn" type="button">取消置顶</button>
+              <button id="batchRefreshIconBtn" class="ghost-btn compact-btn" type="button">刷新图标</button>
+              <button id="batchExportBtn" class="ghost-btn compact-btn" type="button">导出选中</button>
+              <button id="batchDeleteBtn" class="ghost-btn compact-btn danger" type="button">删除</button>
+            </div>
+          </section>
+
           <section id="emptyState" class="empty-state hidden">
             <div id="emptyLottieWrap" class="empty-lottie-wrap hidden" aria-hidden="true">
               <div id="emptyLottie" class="lottie-box"></div>
@@ -232,9 +256,144 @@
         <input id="categoryNameInput" type="text" required maxlength="40" />
       </label>
 
+      <div class="field">
+        <span>分组图标</span>
+        <input id="categoryIconInput" type="hidden" value="paw-cat" />
+        <div id="categoryIconList" class="icon-choice-list" role="radiogroup" aria-label="分组图标"></div>
+      </div>
+
       <div class="dialog-actions">
         <button id="categoryCancelBtn" class="ghost-btn" type="button" data-close-dialog></button>
         <button id="categorySaveBtn" class="primary-btn" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="batchCategoryDialog" class="dialog">
+    <form id="batchCategoryForm" method="dialog" class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <h3 id="batchCategoryTitle">批量修改分组</h3>
+          <p id="batchCategoryDesc">选择要处理的分组。</p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <input id="batchCategoryMode" type="hidden" />
+      <div id="batchCategoryList" class="category-check-list batch-category-list" role="group" aria-label="批量分组"></div>
+
+      <div class="dialog-actions">
+        <button id="batchCategoryCancelBtn" class="ghost-btn" type="button" data-close-dialog>取消</button>
+        <button id="batchCategorySaveBtn" class="primary-btn" type="submit">确认修改</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="importExportDialog" class="dialog import-export-dialog">
+    <form id="importExportForm" method="dialog" class="dialog-card import-export-card">
+      <div class="dialog-head">
+        <div>
+          <h3>导入 / 导出</h3>
+          <p>支持导出备份，也可以导入本平台 JSON 或 Chrome 书签 HTML。</p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <section class="io-panel">
+        <div class="io-block">
+          <strong>导出当前数据</strong>
+          <p>导出会包含书签、分组、多分组关系和图标地址。</p>
+          <div class="io-actions">
+            <button id="exportJsonBtn" class="ghost-btn compact-btn" type="button">导出 JSON</button>
+            <button id="exportCsvBtn" class="ghost-btn compact-btn" type="button">导出 CSV</button>
+          </div>
+        </div>
+
+        <div class="io-block">
+          <strong>导入书签</strong>
+          <p>可以选择本平台 JSON 备份，或浏览器导出的 bookmarks.html。</p>
+          <label class="import-file-box">
+            <input id="importFileInput" type="file" accept=".json,.html,.htm,application/json,text/html" />
+            <span>选择 JSON / HTML 文件</span>
+          </label>
+          <label class="import-option">
+            <input id="importSkipDuplicates" type="checkbox" checked />
+            <span>跳过已存在的网址</span>
+          </label>
+          <div id="importStatus" class="import-status">尚未选择文件。</div>
+          <div id="importPreview" class="import-preview hidden"></div>
+        </div>
+      </section>
+
+      <div class="dialog-actions">
+        <button class="ghost-btn" type="button" data-close-dialog>取消</button>
+        <button id="importRunBtn" class="primary-btn" type="submit" disabled>确认导入</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="trashDialog" class="dialog trash-dialog">
+    <form id="trashForm" method="dialog" class="dialog-card trash-card">
+      <div class="dialog-head">
+        <div>
+          <h3>回收站</h3>
+          <p>删除的书签会先放在这里，你可以恢复或彻底删除。</p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <div id="trashStatus" class="trash-status">正在读取回收站...</div>
+      <div id="trashList" class="trash-list"></div>
+
+      <div class="dialog-actions">
+        <button id="trashEmptyBtn" class="ghost-btn danger" type="button">清空回收站</button>
+        <button class="primary-btn" type="button" data-close-dialog>关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="systemCheckDialog" class="dialog system-check-dialog">
+    <form id="systemCheckForm" method="dialog" class="dialog-card system-check-card">
+      <div class="dialog-head">
+        <div>
+          <h3>系统检查</h3>
+          <p>检查数据库字段、关联表、页面文案、Realtime 状态和当前管理员权限。</p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <div id="systemCheckSummary" class="system-check-summary">点击下方按钮开始检查。</div>
+      <div id="systemCheckList" class="system-check-list"></div>
+
+      <div class="dialog-actions">
+        <button class="ghost-btn" type="button" data-close-dialog>关闭</button>
+        <button id="systemCheckRunBtn" class="primary-btn" type="button">开始检查</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="errorDialog" class="dialog error-dialog">
+    <form method="dialog" class="dialog-card error-card">
+      <div class="dialog-head">
+        <div>
+          <h3 id="errorDialogTitle">出现问题</h3>
+          <p id="errorDialogMessage">操作没有完成。</p>
+        </div>
+
+        <button class="close-btn" type="button" data-close-dialog>×</button>
+      </div>
+
+      <div id="errorDialogDetail" class="error-detail hidden"></div>
+      <div id="errorDialogFix" class="error-fix hidden"></div>
+
+      <div class="dialog-actions">
+        <button class="primary-btn" type="button" data-close-dialog>知道了</button>
       </div>
     </form>
   </dialog>
