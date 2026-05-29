@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bookmark Hub</title>
   <meta name="description" content="Bookmark Hub" />
+  <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 
@@ -59,24 +60,20 @@
             </svg>
 
             <input id="searchInput" type="search" autocomplete="off" />
+            <div id="searchScopeTabs" class="search-scope-tabs" role="group" aria-label="选择搜索范围">
+              <button class="scope-chip is-active" type="button" data-search-scope="all" aria-pressed="true">全部</button>
+              <button class="scope-chip" type="button" data-search-scope="title" aria-pressed="false">名称</button>
+              <button class="scope-chip" type="button" data-search-scope="description" aria-pressed="false">简介</button>
+              <button class="scope-chip" type="button" data-search-scope="url" aria-pressed="false">链接</button>
+              <button class="scope-chip" type="button" data-search-scope="category" aria-pressed="false">分组</button>
+            </div>
             <span id="searchFeedback" class="search-feedback"></span>
           </label>
 
           <div class="top-actions">
+            <button id="loginOpenBtn" class="ghost-btn top-login-btn" type="button"></button>
+            <button id="logoutBtn" class="ghost-btn top-login-btn hidden" type="button"></button>
             <button id="addOpenBtn" class="primary-btn hidden" type="button"></button>
-
-            <div class="view-switch" aria-label="视图切换">
-              <button class="icon-btn is-active" type="button" data-view-mode="grid" aria-label="网格视图">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M5 5h5v5H5V5Zm9 0h5v5h-5V5ZM5 14h5v5H5v-5Zm9 0h5v5h-5v-5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                </svg>
-              </button>
-              <button class="icon-btn" type="button" data-view-mode="list" aria-label="列表视图">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M7 7h12M7 12h12M7 17h12M4.2 7h.1M4.2 12h.1M4.2 17h.1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                </svg>
-              </button>
-            </div>
 
             <button id="themeToggle" class="icon-btn theme-btn" type="button" aria-label="切换主题">
               <span class="theme-knob">
@@ -98,19 +95,28 @@
           </div>
 
           <div class="title-actions">
-            <div class="badge">
-              <span id="realtimeDot" class="dot"></span>
-              <span id="syncStatus"></span>
+            <div class="hero-status-row" aria-label="状态信息">
+              <div class="badge">
+                <span id="realtimeDot" class="dot"></span>
+                <span id="syncStatus"></span>
+              </div>
+              <div id="adminBadge" class="badge admin-badge hidden"></div>
             </div>
 
-            <div id="adminBadge" class="badge admin-badge hidden"></div>
-            <button id="batchToggleBtn" class="ghost-btn batch-toggle-btn hidden" type="button" aria-pressed="false">批量管理</button>
-            <button id="importExportBtn" class="ghost-btn hidden" type="button">导入导出</button>
-            <button id="trashOpenBtn" class="ghost-btn hidden" type="button">回收站</button>
-            <button id="textOpenBtn" class="ghost-btn hidden" type="button"></button>
-            <button id="systemCheckBtn" class="ghost-btn subtle-admin-btn hidden" type="button">系统检查</button>
-            <button id="loginOpenBtn" class="ghost-btn" type="button"></button>
-            <button id="logoutBtn" class="ghost-btn hidden" type="button"></button>
+            <div class="hero-action-panel">
+              <div class="hero-action-group hero-action-primary" data-group-label="常用操作">
+                <button id="groupOpenBtn" class="ghost-btn group-open-btn" type="button">一键打开本组</button>
+                <button id="batchToggleBtn" class="ghost-btn batch-toggle-btn hidden" type="button" aria-pressed="false">批量管理</button>
+                <button id="repairIconBtn" class="ghost-btn hidden" type="button">修复图标</button>
+              </div>
+
+              <div class="hero-action-group hero-action-admin" data-group-label="管理工具">
+                <button id="importExportBtn" class="ghost-btn hidden" type="button">导入导出</button>
+                <button id="trashOpenBtn" class="ghost-btn hidden" type="button">回收站</button>
+                <button id="textOpenBtn" class="ghost-btn hidden" type="button"></button>
+                <button id="systemCheckBtn" class="ghost-btn subtle-admin-btn hidden" type="button">系统检查</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -147,7 +153,7 @@
               <button id="batchRemoveGroupBtn" class="ghost-btn compact-btn" type="button">移除分组</button>
               <button id="batchPinBtn" class="ghost-btn compact-btn" type="button">置顶</button>
               <button id="batchUnpinBtn" class="ghost-btn compact-btn" type="button">取消置顶</button>
-              <button id="batchRefreshIconBtn" class="ghost-btn compact-btn" type="button">刷新图标</button>
+              <button id="batchRefreshIconBtn" class="ghost-btn compact-btn" type="button">修复图标</button>
               <button id="batchExportBtn" class="ghost-btn compact-btn" type="button">导出选中</button>
               <button id="batchDeleteBtn" class="ghost-btn compact-btn danger" type="button">删除</button>
             </div>
@@ -420,6 +426,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="./app.js"></script>
+  <script defer src="./app.js"></script>
 </body>
 </html>
