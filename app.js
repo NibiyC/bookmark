@@ -1,5 +1,3 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-
 const SUPABASE_URL = "https://bmbkahvhqdhbrzbyonuu.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtYmthaHZocWRoYnJ6YnlvbnV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwOTY2MTksImV4cCI6MjA5MjY3MjYxOX0.RW09_EOPzuPHNPOdD2yb44iCOSksqkwRr1mBXEMokcE";
 const ADMIN_EMAIL = "2565667747@qq.com";
@@ -29,6 +27,37 @@ const CATEGORY_ICON_OPTIONS = [
 
 const CATEGORY_ICON_KEYS = new Set(CATEGORY_ICON_OPTIONS.map((item) => item.key));
 const IMPORT_BATCH_SIZE = 40;
+
+const SEARCH_SCOPE_LABELS = {
+  title: "名称",
+  description: "简介",
+  url: "链接",
+  category: "分组",
+  all: "全部",
+};
+const DEFAULT_SEARCH_SCOPE = "all";
+const SEARCH_SCOPE_VERSION_KEY = "bookmark-search-scope-version-v2";
+const BOOKMARK_SITE_ICONS_ENABLED = true;
+const ICON_EDGE_FUNCTION_NAME = "fetch-bookmark-icon";
+const STORAGE_ICON_BUCKET = "bookmark-icons";
+
+// 启动稳定性：不要让 Supabase CDN / 数据库慢连接把整个页面卡成空白。
+// 页面会先渲染默认文案和本地缓存，再在后台连接 Supabase 更新数据。
+const SUPABASE_CLIENT_URLS = [
+  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm",
+  "https://esm.sh/@supabase/supabase-js@2",
+];
+const SUPABASE_CLIENT_QUICK_TIMEOUT = 9000;
+const INITIAL_VISIBLE_TIMEOUT = 2600;
+const DB_REQUEST_TIMEOUT = 13000;
+const AUTH_REQUEST_TIMEOUT = 8000;
+const TEXT_REQUEST_TIMEOUT = 7000;
+const APP_CACHE_KEY = "bookmark-hub-fast-cache-v4";
+const APP_CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 10;
+const BROKEN_ICON_CACHE_KEY = "bookmark-hub-broken-icons-v1";
+const BROKEN_ICON_CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
+const MAX_REMOTE_RETRY_DELAY = 30000;
+
 
 const DEFAULT_TEXT_ROWS = [
   ["brand.title", "我的书签", "左侧顶部网站名称"],
@@ -60,7 +89,7 @@ const DEFAULT_TEXT_ROWS = [
   ["intro.title", "把常用网站放进一个舒服、柔和的收藏空间。", "介绍卡片标题"],
   ["intro.desc", "访客点击卡片直接打开书签；管理员登录后可以维护书签和分组，并实时同步给所有访问者。", "介绍卡片描述"],
 
-  ["search.placeholder", "搜索书签名称...", "搜索框占位文字"],
+  ["search.placeholder", "搜索全部：名称、简介、链接、分组...", "搜索框占位文字"],
   ["search.idle", "⌘ K", "搜索默认提示"],
   ["search.found", "找到 {count} 个", "搜索找到结果"],
   ["search.empty", "没有找到", "搜索无结果"],
@@ -182,7 +211,12 @@ const isConfigured =
   SUPABASE_ANON_KEY &&
   !SUPABASE_ANON_KEY.includes("YOUR_SUPABASE");
 
-const supabase = isConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let supabase = null;
+let supabaseClientPromise = null;
+let supabaseLoadError = null;
+let initialRemoteLoading = false;
+let remoteRetryInFlight = false;
+
 const $ = (selector) => document.querySelector(selector);
 
 const els = {
@@ -207,8 +241,10 @@ const els = {
   loginOpenBtn: $("#loginOpenBtn"),
   logoutBtn: $("#logoutBtn"),
   adminBadge: $("#adminBadge"),
+  groupOpenBtn: $("#groupOpenBtn"),
   textOpenBtn: $("#textOpenBtn"),
   batchToggleBtn: $("#batchToggleBtn"),
+  repairIconBtn: $("#repairIconBtn"),
   importExportBtn: $("#importExportBtn"),
   trashOpenBtn: $("#trashOpenBtn"),
   systemCheckBtn: $("#systemCheckBtn"),
@@ -222,6 +258,7 @@ const els = {
   groupList: $("#groupList"),
   searchShell: $("#searchShell"),
   searchInput: $("#searchInput"),
+  searchScopeTabs: $("#searchScopeTabs"),
   searchFeedback: $("#searchFeedback"),
 
   currentTitle: $("#currentTitle"),
@@ -355,6 +392,16 @@ let ignoreSiteTextRealtimeUntil = 0;
 let realtimePaused = false;
 let realtimeResumeTimer = null;
 let dataRealtimeTimer = null;
+let dataRefreshInFlight = false;
+let dataRefreshQueued = false;
+let sessionIconFailureCache = new Set();
+let sessionIconSuccessCache = new Map();
+let currentSearchScope = localStorage.getItem("bookmark-search-scope") || DEFAULT_SEARCH_SCOPE;
+if (localStorage.getItem(SEARCH_SCOPE_VERSION_KEY) !== "2") {
+  currentSearchScope = DEFAULT_SEARCH_SCOPE;
+  localStorage.setItem("bookmark-search-scope", DEFAULT_SEARCH_SCOPE);
+  localStorage.setItem(SEARCH_SCOPE_VERSION_KEY, "2");
+}
 let bookmarksDataSignature = "";
 let categoriesDataSignature = "";
 let quietRenderTimer = null;
@@ -363,6 +410,7 @@ let pendingImportPreview = null;
 let activeCardMenuId = null;
 let isInitialLoading = true;
 let deletedBookmarksCache = [];
+let remoteRetryCount = 0;
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -374,7 +422,7 @@ function timeoutError(label = "请求") {
   return error;
 }
 
-async function withTimeout(promise, ms = 12000, label = "请求") {
+async function withTimeout(promise, ms = DB_REQUEST_TIMEOUT, label = "请求") {
   let timer = null;
 
   try {
@@ -389,12 +437,317 @@ async function withTimeout(promise, ms = 12000, label = "请求") {
   }
 }
 
-async function runSupabaseQuery(query, label = "数据库请求", ms = 12000) {
+function isRequestTimeout(error) {
+  const message = getReadableError(error).toLowerCase();
+  return error?.code === "REQUEST_TIMEOUT" || message.includes("超时") || message.includes("timeout");
+}
+
+function shouldTrySchemaFallback(error) {
+  if (!error || isRequestTimeout(error)) return false;
+
+  const message = getReadableError(error).toLowerCase();
+  return (
+    message.includes("column") ||
+    message.includes("schema cache") ||
+    message.includes("could not find") ||
+    message.includes("relation") ||
+    message.includes("does not exist")
+  );
+}
+
+async function runSupabaseQuery(query, label = "数据库请求", ms = DB_REQUEST_TIMEOUT) {
   try {
     return await withTimeout(query, ms, label);
   } catch (error) {
     return { data: null, error };
   }
+}
+
+function createSupabaseClient(createClient) {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+    global: {
+      fetch: (input, init = {}) => fetch(input, {
+        ...init,
+        cache: "no-store",
+      }),
+    },
+  });
+}
+
+async function ensureSupabaseClient(options = {}) {
+  const { timeout = SUPABASE_CLIENT_QUICK_TIMEOUT, silent = false } = options;
+
+  if (!isConfigured) return null;
+  if (supabase) return supabase;
+
+  if (!supabaseClientPromise) {
+    supabaseClientPromise = (async () => {
+      let lastError = null;
+
+      for (const url of SUPABASE_CLIENT_URLS) {
+        try {
+          const mod = await withTimeout(import(url), timeout, "加载 Supabase 客户端");
+          const createClient = mod?.createClient || mod?.default?.createClient;
+
+          if (typeof createClient !== "function") {
+            throw new Error("Supabase 客户端加载成功，但没有找到 createClient。");
+          }
+
+          supabase = createSupabaseClient(createClient);
+          supabaseLoadError = null;
+          return supabase;
+        } catch (error) {
+          lastError = error;
+          console.warn("Supabase client source failed:", url, error);
+        }
+      }
+
+      supabaseLoadError = lastError || timeoutError("加载 Supabase 客户端");
+      throw supabaseLoadError;
+    })().finally(() => {
+      if (!supabase) supabaseClientPromise = null;
+    });
+  }
+
+  try {
+    return await withTimeout(supabaseClientPromise, timeout + 800, "等待 Supabase 客户端");
+  } catch (error) {
+    supabaseLoadError = error;
+    if (!silent) console.error("Supabase 客户端加载失败：", error);
+    return null;
+  }
+}
+
+function saveAppCache() {
+  try {
+    if (!Array.isArray(bookmarks) || !Array.isArray(categories)) return;
+
+    localStorage.setItem(APP_CACHE_KEY, JSON.stringify({
+      version: 3,
+      savedAt: Date.now(),
+      bookmarks,
+      categories,
+      siteTextRows,
+      texts,
+    }));
+  } catch (error) {
+    console.warn("保存本地缓存失败：", error);
+  }
+}
+
+function restoreAppCache() {
+  try {
+    const raw = localStorage.getItem(APP_CACHE_KEY);
+    if (!raw) return false;
+
+    const cached = JSON.parse(raw);
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > APP_CACHE_MAX_AGE) {
+      localStorage.removeItem(APP_CACHE_KEY);
+      return false;
+    }
+
+    if (Array.isArray(cached.categories)) {
+      categories = cached.categories;
+      categoriesDataSignature = getCategoriesDataSignature(categories);
+    }
+
+    if (Array.isArray(cached.bookmarks)) {
+      bookmarks = cached.bookmarks;
+      bookmarksDataSignature = getBookmarksDataSignature(bookmarks);
+    }
+
+    if (Array.isArray(cached.siteTextRows)) {
+      siteTextRows = cached.siteTextRows;
+    }
+
+    if (cached.texts && typeof cached.texts === "object") {
+      texts = { ...texts, ...cached.texts };
+      applySiteTexts();
+    }
+
+    return Boolean(bookmarks.length || categories.length || siteTextRows.length);
+  } catch (error) {
+    console.warn("读取本地缓存失败：", error);
+    return false;
+  }
+}
+
+
+function normalizeIconCacheUrl(url = "") {
+  return String(url || "").trim();
+}
+
+function getBrokenIconCache() {
+  try {
+    const raw = localStorage.getItem(BROKEN_ICON_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    let changed = false;
+
+    for (const [key, time] of Object.entries(parsed)) {
+      if (!time || now - Number(time) > BROKEN_ICON_CACHE_MAX_AGE) {
+        delete parsed[key];
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      localStorage.setItem(BROKEN_ICON_CACHE_KEY, JSON.stringify(parsed));
+    }
+
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getBrokenIconKey(bookmarkId, iconUrl) {
+  return `${String(bookmarkId || "")}|${normalizeIconCacheUrl(iconUrl)}`;
+}
+
+function isBrokenIcon(bookmarkId, iconUrl) {
+  const url = normalizeIconCacheUrl(iconUrl);
+  if (!url) return false;
+
+  const cache = getBrokenIconCache();
+  return Boolean(cache[getBrokenIconKey(bookmarkId, url)]);
+}
+
+function rememberBrokenIcon(bookmarkId, iconUrl) {
+  const url = normalizeIconCacheUrl(iconUrl);
+  if (!bookmarkId || !url) return;
+
+  try {
+    const cache = getBrokenIconCache();
+    cache[getBrokenIconKey(bookmarkId, url)] = Date.now();
+    localStorage.setItem(BROKEN_ICON_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
+function forgetBrokenIcon(bookmarkId, iconUrl) {
+  const url = normalizeIconCacheUrl(iconUrl);
+  if (!bookmarkId || !url) return;
+
+  try {
+    const cache = getBrokenIconCache();
+    const key = getBrokenIconKey(bookmarkId, url);
+    if (cache[key]) {
+      delete cache[key];
+      localStorage.setItem(BROKEN_ICON_CACHE_KEY, JSON.stringify(cache));
+    }
+  } catch {}
+}
+
+function isSupabaseStorageIconUrl(url = "") {
+  const value = String(url || "").trim();
+  if (!value) return false;
+
+  try {
+    const parsed = new URL(value);
+    const supabaseHost = new URL(SUPABASE_URL).hostname;
+    return parsed.hostname === supabaseHost && parsed.pathname.includes(`/storage/v1/object/public/${STORAGE_ICON_BUCKET}/`);
+  } catch {
+    return false;
+  }
+}
+
+function getRenderableIconUrl(item = {}) {
+  // 只显示 Supabase Storage 已缓存的图标。
+  // 不再请求 google favicon / gstatic / DuckDuckGo / 目标站 favicon.ico。
+  if (!BOOKMARK_SITE_ICONS_ENABLED) return "";
+
+  const iconUrl = String(item.icon_url || "").trim();
+  if (!isSupabaseStorageIconUrl(iconUrl)) return "";
+  if (isBrokenIcon(item.id, iconUrl)) return "";
+
+  return iconUrl;
+}
+
+function renderCardLogo(item = {}, initial = "?", logoTextClass = "") {
+  const iconUrl = getRenderableIconUrl(item);
+  const baseClass = iconUrl ? "has-icon" : "is-fallback";
+
+  return `
+    <span class="card-logo ${baseClass} ${logoTextClass}" data-fallback-initial="${escapeAttr(initial)}" aria-hidden="true">
+      <span class="card-logo-text">${escapeHtml(initial)}</span>
+      ${iconUrl ? `
+        <img
+          class="card-favicon"
+          data-card-icon-img
+          data-bookmark-id="${escapeAttr(item.id)}"
+          src="${escapeAttr(iconUrl)}"
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        />
+      ` : ""}
+    </span>
+  `;
+}
+
+function finishInitialPaint(quiet = false) {
+  updateAdminVisibility();
+  finishLoadingSkeleton();
+  safeRender(quiet);
+}
+
+function retryRemoteLoadSoon(delay = 5000) {
+  if (remoteRetryInFlight || !isConfigured) return;
+
+  const finalDelay = Math.min(Number(delay) || 5000, MAX_REMOTE_RETRY_DELAY);
+  let nextDelay = Math.min(Math.max(finalDelay * 1.7, 6500), MAX_REMOTE_RETRY_DELAY);
+  let succeeded = false;
+  remoteRetryInFlight = true;
+
+  setTimeout(async () => {
+    try {
+      const client = await ensureSupabaseClient({ timeout: Math.max(DB_REQUEST_TIMEOUT, SUPABASE_CLIENT_QUICK_TIMEOUT), silent: true });
+      if (!client) {
+        throw supabaseLoadError || timeoutError("加载 Supabase 客户端");
+      }
+
+      initialRemoteLoading = true;
+      const results = await Promise.allSettled([
+        loadSiteTexts(),
+        loadAllData({ quiet: true, renderAfter: false }),
+      ]);
+
+      loadSession({ renderAfter: true }).catch((error) => {
+        console.warn("后台读取登录状态失败：", error);
+      });
+
+      const hasDataSuccess = results.some((result) => result.status === "fulfilled" && result.value !== false);
+      const rejected = results.find((result) => result.status === "rejected");
+
+      if (!hasDataSuccess) {
+        throw rejected?.reason || new Error("后台数据读取暂未成功");
+      }
+
+      remoteRetryCount = 0;
+      succeeded = true;
+      setRealtimeStatus("online", t("sync.online"));
+      finishInitialPaint(true);
+      subscribeRealtime();
+    } catch (error) {
+      remoteRetryCount += 1;
+      nextDelay = Math.min(4000 * Math.pow(1.7, remoteRetryCount), MAX_REMOTE_RETRY_DELAY);
+      console.warn("后台重连 Supabase 失败：", error);
+      setRealtimeStatus("error", `连接重试中 ${Math.ceil(nextDelay / 1000)}s`);
+    } finally {
+      initialRemoteLoading = false;
+      remoteRetryInFlight = false;
+
+      if (!succeeded) {
+        retryRemoteLoadSoon(nextDelay);
+      }
+    }
+  }, finalDelay);
 }
 
 function stableValue(value) {
@@ -413,9 +766,9 @@ function getBookmarksDataSignature(rows = []) {
     stableValue(item.category_names),
     stableValue(item.icon_url),
     stableValue(item.icon_status),
+    stableValue(item.icon_checked_at),
+    stableValue(item.icon_storage_path),
     stableValue(item.is_pinned),
-    stableValue(item.open_count),
-    stableValue(item.last_opened_at),
     stableValue(item.is_deleted),
     stableValue(item.deleted_at),
     stableValue(item.is_active),
@@ -500,13 +853,31 @@ function resumeRealtimeSoon(delay = 900) {
   }, delay);
 }
 
-function scheduleDataRealtimeRefresh() {
+function scheduleDataRealtimeRefresh(delay = 850) {
   if (realtimePaused) return;
 
   clearTimeout(dataRealtimeTimer);
+  const finalDelay = document.hidden ? Math.max(delay, 1600) : delay;
+
   dataRealtimeTimer = setTimeout(async () => {
-    await loadAllData({ quiet: true });
-  }, 360);
+    if (dataRefreshInFlight) {
+      dataRefreshQueued = true;
+      return;
+    }
+
+    dataRefreshInFlight = true;
+
+    try {
+      await loadAllData({ quiet: true, renderAfter: true });
+    } finally {
+      dataRefreshInFlight = false;
+
+      if (dataRefreshQueued) {
+        dataRefreshQueued = false;
+        scheduleDataRealtimeRefresh(1000);
+      }
+    }
+  }, finalDelay);
 }
 
 function t(key, params = {}) {
@@ -552,22 +923,15 @@ function normalizeUrl(url) {
 }
 
 function getBookmarkIconUrl(url) {
-  try {
-    const parsed = new URL(normalizeUrl(url || ""));
-    const origin = `${parsed.protocol}//${parsed.hostname}`;
+  return "";
+}
 
-    // 优先加载网站 favicon。只有图片加载失败时，才显示书签名称首字。
-    return `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(origin)}&sz=128`;
-  } catch {
-    return "";
-  }
+function getAlternateBookmarkIconUrl(url) {
+  return "";
 }
 
 function getRefreshBookmarkIconUrl(url) {
-  const base = getBookmarkIconUrl(url);
-  if (!base) return "";
-  const joiner = base.includes("?") ? "&" : "?";
-  return `${base}${joiner}v=${Date.now()}`;
+  return "";
 }
 
 function getDefaultCategoryIcon(name = "") {
@@ -929,7 +1293,7 @@ function getDatabaseFixHint(error) {
   }
 
   if (message.includes("relation") && message.includes("does not exist")) {
-    return "数据库表或关联表不存在。请确认已经运行包含 bookmark_categories、icon_url、icon_status、is_pinned 等结构的最新 SQL。";
+    return "数据库表或关联表不存在。请确认已经运行包含 bookmark_categories、is_pinned 等结构的最新 SQL。";
   }
 
   if (message.includes("permission") || message.includes("row-level security") || message.includes("rls")) {
@@ -960,7 +1324,16 @@ function showErrorDialog(title, message, detail = "", fix = "") {
   els.errorDialogFix.textContent = fixText;
   els.errorDialogFix.classList.toggle("hidden", !fixText);
 
-  els.errorDialog.showModal();
+  requestAnimationFrame(() => {
+    try {
+      if (els.errorDialog.open) els.errorDialog.close();
+      els.errorDialog.showModal();
+      els.errorDialog.focus();
+    } catch (error) {
+      console.error("error dialog failed", error);
+      showToast(message || title || "操作失败", "error");
+    }
+  });
 }
 
 function handleOperationError(error, title = "操作失败", userMessage = "这次操作没有完成。", options = {}) {
@@ -1026,8 +1399,9 @@ function applySiteTexts() {
   els.introTitle.textContent = t("intro.title");
   els.introDesc.textContent = t("intro.desc");
 
-  els.searchInput.placeholder = t("search.placeholder");
-  els.searchFeedback.textContent = t("search.idle");
+  updateSearchPlaceholder();
+  els.searchFeedback.textContent = SEARCH_SCOPE_LABELS[getSearchScope()] || t("search.idle");
+  renderSearchScopeTabs();
   els.addOpenBtn.textContent = t("bookmark.addButton");
 
   els.emptyTitle.textContent = t("empty.title");
@@ -1084,6 +1458,18 @@ function setRealtimeStatus(status, textValue) {
 
 function updateAdminVisibility() {
   const admin = isAdmin();
+  const titlebar = document.querySelector(".titlebar");
+  const heroPanel = document.querySelector(".hero-action-panel");
+  const heroAdminGroup = document.querySelector(".hero-action-admin");
+  const heroPrimaryGroup = document.querySelector(".hero-action-primary");
+
+  document.body.classList.toggle("is-admin-user", admin);
+  document.body.classList.toggle("is-guest-user", !admin);
+  titlebar?.classList.toggle("is-admin-layout", admin);
+  titlebar?.classList.toggle("is-guest-layout", !admin);
+  heroPanel?.classList.toggle("only-guest", !admin);
+  heroAdminGroup?.classList.toggle("hidden", !admin);
+  heroPrimaryGroup?.classList.toggle("only-guest", !admin);
 
   if (!admin) {
     sidebarEditMode = false;
@@ -1101,6 +1487,7 @@ function updateAdminVisibility() {
     els.groupManageBtn.title = sidebarEditMode ? "退出分组整理模式" : "整理分组";
   }
 
+  els.repairIconBtn?.classList.toggle("hidden", !admin);
   els.batchToggleBtn?.classList.toggle("hidden", !admin);
   els.batchToggleBtn?.classList.toggle("is-active", admin && batchMode);
   els.batchToggleBtn?.setAttribute("aria-pressed", String(admin && batchMode));
@@ -1187,14 +1574,73 @@ function getCategoryCount(name) {
 }
 
 
+function getSearchScope() {
+  return SEARCH_SCOPE_LABELS[currentSearchScope] ? currentSearchScope : DEFAULT_SEARCH_SCOPE;
+}
+
+function getSearchPlaceholder(scope = getSearchScope()) {
+  const placeholders = {
+    all: "搜索全部：名称、简介、链接、分组...",
+    title: "搜索书签名称...",
+    description: "搜索书签简介...",
+    url: "搜索书签链接或域名...",
+    category: "搜索书签分组...",
+  };
+
+  return placeholders[scope] || t("search.placeholder");
+}
+
+function updateSearchPlaceholder() {
+  if (!els.searchInput) return;
+  els.searchInput.placeholder = getSearchPlaceholder();
+}
+
+function renderSearchScopeTabs() {
+  if (!els.searchScopeTabs) return;
+
+  els.searchScopeTabs.querySelectorAll("[data-search-scope]").forEach((button) => {
+    const active = button.dataset.searchScope === getSearchScope();
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
+  updateSearchPlaceholder();
+}
+
+function setSearchScope(scope, renderAfter = true) {
+  if (!SEARCH_SCOPE_LABELS[scope]) return;
+
+  currentSearchScope = scope;
+  localStorage.setItem("bookmark-search-scope", scope);
+  renderSearchScopeTabs();
+
+  if (renderAfter) render();
+}
+
+function getBookmarkSearchText(item, scope = getSearchScope()) {
+  const categoriesText = getBookmarkCategories(item).join(" ");
+  const domainText = getBookmarkDomain(item.url);
+
+  const fields = {
+    title: item.title,
+    description: item.description,
+    url: `${item.url || ""} ${domainText}`,
+    category: categoriesText,
+    all: `${item.title || ""} ${item.description || ""} ${item.url || ""} ${domainText} ${categoriesText}`,
+  };
+
+  return String(fields[scope] ?? fields.title ?? "").toLowerCase();
+}
+
 function getFilteredBookmarks() {
   const q = els.searchInput.value.trim().toLowerCase();
+  const scope = getSearchScope();
 
   return bookmarks.filter((item) => {
     const categoryMatch = currentCategory === "全部" || getBookmarkCategories(item).includes(currentCategory);
-    const titleValue = String(item.title || "").toLowerCase();
+    const searchableText = getBookmarkSearchText(item, scope);
 
-    return categoryMatch && (!q || titleValue.includes(q));
+    return categoryMatch && (!q || searchableText.includes(q));
   });
 }
 
@@ -1222,18 +1668,61 @@ function updateSearchFeedback(filteredCount) {
   els.searchShell.classList.remove("searching", "no-results");
 
   if (!q) {
-    els.searchFeedback.textContent = t("search.idle");
+    els.searchFeedback.textContent = SEARCH_SCOPE_LABELS[getSearchScope()] || t("search.idle");
     return;
   }
 
   if (filteredCount > 0) {
-    els.searchFeedback.textContent = t("search.found", { count: filteredCount });
+    const scopeLabel = SEARCH_SCOPE_LABELS[getSearchScope()] || "名称";
+    els.searchFeedback.textContent = `${scopeLabel} · ${t("search.found", { count: filteredCount })}`;
     els.searchShell.classList.add("searching");
   } else {
     els.searchFeedback.textContent = t("search.empty");
     els.searchShell.classList.add("no-results");
   }
 }
+
+function updateGroupOpenButton(filteredCount = getFilteredBookmarks().length) {
+  if (!els.groupOpenBtn) return;
+
+  const hasSearch = Boolean(els.searchInput.value.trim());
+  const label = hasSearch
+    ? `打开结果（${filteredCount}）`
+    : currentCategory === "全部"
+      ? `一键打开全部（${filteredCount}）`
+      : `一键打开本组（${filteredCount}）`;
+
+  els.groupOpenBtn.textContent = label;
+  els.groupOpenBtn.disabled = filteredCount <= 0;
+}
+
+function openCurrentVisibleBookmarks() {
+  const items = getFilteredBookmarks().filter((item) => item?.url);
+
+  if (!items.length) {
+    showToast("当前没有可以打开的书签", "error");
+    return;
+  }
+
+  if (items.length > 12) {
+    const confirmed = window.confirm(`即将打开 ${items.length} 个网页。浏览器可能会拦截批量弹窗，确定继续吗？`);
+    if (!confirmed) return;
+  }
+
+  let blockedCount = 0;
+
+  for (const item of items) {
+    const opened = window.open(normalizeUrl(item.url), "_blank", "noopener,noreferrer");
+    if (!opened) blockedCount += 1;
+  }
+
+  if (blockedCount > 0) {
+    showToast(`有 ${blockedCount} 个网页可能被浏览器拦截，请允许此网站弹出窗口。`, "error");
+  } else {
+    showToast(`已打开 ${items.length} 个网页`);
+  }
+}
+
 
 function setBookmarkView(view, persist = true) {
   const nextView = view === "list" ? "list" : "grid";
@@ -1469,8 +1958,6 @@ function renderGroupList() {
 function renderCard(item, index) {
   const admin = isAdmin();
   const isHighlighted = highlightBookmarkId && String(item.id) === String(highlightBookmarkId);
-  const shouldTryIcon = item.icon_status !== "failed";
-  const iconUrl = shouldTryIcon ? (item.icon_url || getBookmarkIconUrl(item.url)) : "";
   const initial = getBookmarkInitial(item.title);
   const logoTextClass = initial.length >= 3 ? "is-word-logo" : initial.length >= 2 ? "is-short-logo" : "";
   const domain = getBookmarkDomain(item.url);
@@ -1504,7 +1991,8 @@ function renderCard(item, index) {
         <div class="card-menu-panel" role="menu">
           <button type="button" data-edit="${escapeAttr(item.id)}" role="menuitem">编辑</button>
           <button type="button" data-copy-link="${escapeAttr(item.id)}" role="menuitem">复制链接</button>
-          <button type="button" data-refresh-icon="${escapeAttr(item.id)}" role="menuitem">刷新图标</button>
+          <button type="button" data-refresh-icon="${escapeAttr(item.id)}" role="menuitem">修复图标</button>
+          <button type="button" data-upload-icon="${escapeAttr(item.id)}" role="menuitem">上传图标</button>
           <button type="button" data-pin="${escapeAttr(item.id)}" data-pin-value="${item.is_pinned ? "false" : "true"}" role="menuitem">${item.is_pinned ? "取消置顶" : "置顶"}</button>
           <button class="danger" type="button" data-delete="${escapeAttr(item.id)}" role="menuitem">删除</button>
         </div>
@@ -1512,11 +2000,9 @@ function renderCard(item, index) {
     `
     : "";
 
-  const guestAttrs = admin
-    ? ""
-    : `data-open-url="${escapeAttr(item.url)}" role="link" tabindex="0" aria-label="${escapeAttr(item.title)}"`;
+  const openAttrs = `data-open-url="${escapeAttr(item.url)}" role="link" tabindex="0" aria-label="${escapeAttr(item.title)}"`;
 
-  const guestHint = admin ? "" : `<div class="guest-hint">${escapeHtml(t("bookmark.openHint"))}</div>`;
+  const guestHint = batchMode ? "" : `<div class="guest-hint">${escapeHtml(t("bookmark.openHint"))}</div>`;
   const pinnedBadge = item.is_pinned ? `<span class="pin-badge" title="置顶">★</span>` : "";
 
   return `
@@ -1524,16 +2010,13 @@ function renderCard(item, index) {
       class="card ${admin ? "admin-card" : "guest-card"} ${batchMode ? "is-batch-mode" : ""} ${item.is_pinned ? "is-pinned" : ""} ${isBatchSelected ? "is-selected" : ""} ${isHighlighted ? "is-new" : ""}"
       data-card-id="${escapeAttr(item.id)}"
       style="animation-delay:${Math.min(index * 35, 280)}ms"
-      ${guestAttrs}
+      ${openAttrs}
     >
       <div class="card-content">
         <span class="card-sheen" aria-hidden="true"></span>
         <div class="card-top">
           ${batchSelector}
-          <span class="card-logo ${iconUrl ? "is-loading" : "is-fallback"} ${logoTextClass}" aria-hidden="true" ${iconUrl ? `data-icon-url="${escapeAttr(iconUrl)}"` : ""}>
-            ${iconUrl ? `<img class="card-favicon" src="${escapeAttr(iconUrl)}" alt="" decoding="async" referrerpolicy="no-referrer" data-bookmark-icon-id="${escapeAttr(item.id)}">` : ""}
-            <span class="card-logo-text">${escapeHtml(initial)}</span>
-          </span>
+          ${renderCardLogo(item, initial, logoTextClass)}
           ${pinnedBadge}
           ${adminButtons}
         </div>
@@ -1558,10 +2041,7 @@ function renderTextEditor() {
   for (const row of rowsForEditor) {
     const groupKey = row.key.includes(".") ? row.key.split(".")[0] : "other";
 
-    if (!grouped[groupKey]) {
-      grouped[groupKey] = [];
-    }
-
+    if (!grouped[groupKey]) grouped[groupKey] = [];
     grouped[groupKey].push(row);
   }
 
@@ -1569,17 +2049,17 @@ function renderTextEditor() {
     "brand",
     "sidebar",
     "top",
-    "sync",
     "admin",
-    "intro",
     "search",
     "bookmark",
     "empty",
+    "intro",
     "login",
     "bookmarkForm",
     "categoryForm",
     "textForm",
     "common",
+    "sync",
     "toast",
     "confirm",
     "setup",
@@ -1593,7 +2073,7 @@ function renderTextEditor() {
       const rows = grouped[groupKey];
 
       return `
-        <section class="copy-group" data-copy-group="${escapeAttr(groupKey)}">
+        <section class="copy-group copy-group-open" data-copy-group="${escapeAttr(groupKey)}">
           <div class="copy-group-head">
             <div>
               <strong>${escapeHtml(meta.title)}</strong>
@@ -1605,6 +2085,7 @@ function renderTextEditor() {
           <div class="copy-group-body">
             ${rows.map((row) => {
               const value = row.value ?? texts[row.key] ?? "";
+              const isLongText = String(value).length > 42 || String(value).includes("，") || String(value).includes("。");
               return `
                 <label class="copy-field">
                   <span class="copy-field-info">
@@ -1615,7 +2096,7 @@ function renderTextEditor() {
                   <textarea
                     data-text-key="${escapeAttr(row.key)}"
                     spellcheck="false"
-                    rows="2"
+                    rows="${isLongText ? 3 : 2}"
                   >${escapeHtml(value)}</textarea>
                 </label>
               `;
@@ -1626,9 +2107,9 @@ function renderTextEditor() {
     })
     .join("");
 
-  els.textList.innerHTML = html || `
-    <div class="copy-empty">暂无可编辑文案。</div>
-  `;
+  els.textList.innerHTML = html
+    ? `<div class="copy-editor-tip">所有可编辑文案已展开显示，直接修改右侧输入框后点击“保存文案”。这里只保留普通访问者能看到或管理员常用的页面文字。</div>${html}`
+    : `<div class="copy-empty">暂无可编辑文案。</div>`;
 }
 
 function renderBookmarkSection(title, items, startIndex = 0, variant = "normal", desc = "") {
@@ -1662,106 +2143,428 @@ function render() {
     ? filtered.filter((item) => item.is_pinned)
     : [];
   const pinnedIds = new Set(pinned.map((item) => String(item.id)));
-  const recent = !searchText
-    ? [...filtered]
-        .filter((item) => item.last_opened_at && !pinnedIds.has(String(item.id)))
-        .sort((a, b) => String(b.last_opened_at || "").localeCompare(String(a.last_opened_at || "")))
-        .slice(0, 4)
-    : [];
-  const recentIds = new Set(recent.map((item) => String(item.id)));
-  const frequent = !searchText
-    ? getTopFrequentBookmarks(filtered, 4, new Set([...pinnedIds, ...recentIds]))
-    : [];
-  const frequentIds = new Set(frequent.map((item) => String(item.id)));
-  const usedIds = new Set([...pinnedIds, ...recentIds, ...frequentIds]);
-  const normal = filtered.filter((item) => !usedIds.has(String(item.id)));
-  const shouldSection = recent.length > 0 || pinned.length > 0 || frequent.length > 0;
+  const normal = filtered.filter((item) => !pinnedIds.has(String(item.id)));
+  const shouldSection = pinned.length > 0;
 
   updatePageMeta(filtered.length);
   updateSearchFeedback(filtered.length);
+  updateGroupOpenButton(filtered.length);
 
   els.emptyState.classList.toggle("hidden", filtered.length > 0);
   els.bookmarkGrid.classList.toggle("has-sections", shouldSection);
   els.bookmarkGrid.innerHTML = shouldSection
     ? [
         renderBookmarkSection("置顶收藏", pinned, 0, "pinned", "重要链接始终放在最前面"),
-        renderBookmarkSection("最近打开", recent, pinned.length, "recent", "按照最近访问时间自动更新"),
-        renderBookmarkSection("最常用", frequent, pinned.length + recent.length, "frequent", "根据打开次数自动排序"),
-        renderBookmarkSection(currentCategory === "全部" ? "全部收藏" : "普通收藏", normal, pinned.length + recent.length + frequent.length, "normal", "其余收藏按当前分组展示"),
+        renderBookmarkSection(currentCategory === "全部" ? "全部收藏" : "普通收藏", normal, pinned.length, "normal", "其余收藏按当前分组展示"),
       ].join("")
     : filtered.map((item, index) => renderCard(item, index)).join("");
 
-  activateBookmarkIcons();
   updateBatchUI();
 }
 
-async function updateBookmarkIconCache(bookmarkId, patch = {}) {
-  if (!supabase || !isAdmin() || !bookmarkId) return;
+async function updateBookmarkIconCache(bookmarkId, patch = {}, options = {}) {
+  const index = bookmarks.findIndex((item) => String(item.id) === String(bookmarkId));
+  if (index < 0) return;
 
-  const safePatch = {
+  bookmarks[index] = {
+    ...bookmarks[index],
     ...patch,
-    icon_checked_at: new Date().toISOString(),
   };
 
-  await supabase
-    .from("bookmarks")
-    .update(safePatch)
-    .eq("id", bookmarkId);
+  bookmarksDataSignature = getBookmarksDataSignature(bookmarks);
+  saveAppCache();
+
+  if (options.renderAfter) {
+    safeRender(true);
+  }
 }
 
 function activateBookmarkIcons() {
-  const images = els.bookmarkGrid.querySelectorAll(".card-logo img.card-favicon");
+  if (activateBookmarkIcons.bound || !els.bookmarkGrid) return;
 
-  images.forEach((img) => {
+  els.bookmarkGrid.addEventListener("error", (event) => {
+    const img = event.target?.closest?.("[data-card-icon-img]");
+    if (!img) return;
+
+    const bookmarkId = img.dataset.bookmarkId;
+    const iconUrl = img.getAttribute("src") || "";
+    rememberBrokenIcon(bookmarkId, iconUrl);
+
     const logo = img.closest(".card-logo");
-    if (!logo || img.dataset.iconHandled === "true") return;
-
-    img.dataset.iconHandled = "true";
-
-    const showIcon = () => {
-      clearTimeout(img.iconFallbackTimer);
-
-      if (!img.naturalWidth) {
-        showFallback();
-        return;
-      }
-
-      logo.classList.add("has-icon");
-      logo.classList.remove("is-fallback", "is-loading");
-
-      const bookmarkId = img.dataset.bookmarkIconId;
-      const item = bookmarks.find((bookmark) => String(bookmark.id) === String(bookmarkId));
-      if (bookmarkId && isAdmin() && item && (item.icon_status !== "ok" || !item.icon_url)) {
-        updateBookmarkIconCache(bookmarkId, {
-          icon_url: img.currentSrc || img.src,
-          icon_status: "ok",
-        });
-      }
-    };
-
-    const showFallback = () => {
-      clearTimeout(img.iconFallbackTimer);
-      logo.classList.add("is-fallback");
+    if (logo) {
       logo.classList.remove("has-icon", "is-loading");
+      logo.classList.add("is-fallback");
+    }
 
-      const bookmarkId = img.dataset.bookmarkIconId;
-      const item = bookmarks.find((bookmark) => String(bookmark.id) === String(bookmarkId));
-      if (bookmarkId && isAdmin() && item && item.icon_status !== "failed") {
-        updateBookmarkIconCache(bookmarkId, { icon_status: "failed" });
+    img.remove();
+  }, true);
+
+  activateBookmarkIcons.bound = true;
+}
+
+async function fetchBookmarkIconWithEdge(bookmarkId, url, options = {}) {
+  const { force = false, debug = true } = options;
+
+  if (!BOOKMARK_SITE_ICONS_ENABLED) {
+    return { data: null, error: new Error("图标功能未启用") };
+  }
+
+  if (!isAdmin()) {
+    return { data: null, error: new Error(t("toast.noPermission")) };
+  }
+
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      return { data: null, error: timeoutError("连接 Supabase") };
+    }
+  }
+
+  try {
+    const result = await withTimeout(
+      supabase.functions.invoke(ICON_EDGE_FUNCTION_NAME, {
+        body: {
+          bookmark_id: bookmarkId,
+          url,
+          force,
+          debug,
+        },
+      }),
+      45000,
+      "修复图标"
+    );
+
+    if (result.error) return result;
+
+    if (result.data && result.data.ok === false) {
+      const message = getIconRepairErrorMessage(result.data, null);
+      return { data: result.data, error: new Error(message || "图标修复失败") };
+    }
+
+    if (result.data?.ok && result.data?.icon_url) {
+      const nextIconUrl = String(result.data.icon_url || "").trim();
+
+      if (!isSupabaseStorageIconUrl(nextIconUrl)) {
+        return {
+          data: result.data,
+          error: new Error("Edge Function 返回的不是 Supabase Storage 图标，已跳过。"),
+        };
       }
 
-      img.remove();
-    };
+      forgetBrokenIcon(bookmarkId, nextIconUrl);
+      await updateBookmarkIconCache(bookmarkId, {
+        icon_url: nextIconUrl,
+        icon_status: "success",
+        icon_checked_at: new Date().toISOString(),
+        icon_storage_path: result.data.icon_storage_path || result.data.icon_path || null,
+      });
+    }
 
-    if (img.complete) {
-      showIcon();
+    return result;
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
+function getIconRepairErrorMessage(data = null, error = null) {
+  if (error?.message) return error.message;
+  if (typeof error === "string") return error;
+  if (data?.error) return String(data.error);
+
+  const attempts = Array.isArray(data?.attempts) ? data.attempts : [];
+  const failed = attempts.filter((item) => item && item.ok === false);
+  const last = failed.at(-1) || attempts.at(-1);
+
+  if (last?.reason) return String(last.reason);
+  if (last?.status) return `HTTP ${last.status}`;
+
+  return "未知原因";
+}
+
+function getIconRepairAttemptSummary(data = null, limit = 5) {
+  const attempts = Array.isArray(data?.attempts) ? data.attempts : [];
+  if (!attempts.length) return "";
+
+  return attempts
+    .filter((item) => item && item.ok === false)
+    .slice(-limit)
+    .map((item) => {
+      const source = item.source || "候选地址";
+      const reason = item.reason || (item.status ? `HTTP ${item.status}` : "失败");
+      return `${source}：${reason}`;
+    })
+    .join("；");
+}
+
+function queueBookmarkIconFetch(bookmarkId, url, options = {}) {
+  if (!BOOKMARK_SITE_ICONS_ENABLED || !isAdmin() || !bookmarkId || !url) return;
+
+  setTimeout(async () => {
+    const result = await fetchBookmarkIconWithEdge(bookmarkId, url, options);
+    if (result.error) {
+      console.warn("图标后台修复失败：", result.error);
+    }
+  }, 900);
+}
+
+function getIconRepairTargets(mode = "missing") {
+  const rows = bookmarks.filter((item) => item?.id && item?.url && item.is_deleted !== true && item.is_active !== false);
+
+  if (mode === "all") return rows;
+  if (mode === "failed") return rows.filter((item) => item.icon_status === "failed");
+
+  return rows.filter((item) => !isSupabaseStorageIconUrl(item.icon_url) || item.icon_status === "failed");
+}
+
+function getIconRepairSummary() {
+  const rows = bookmarks.filter((item) => item?.id && item?.url && item.is_deleted !== true && item.is_active !== false);
+  const ready = rows.filter((item) => isSupabaseStorageIconUrl(item.icon_url)).length;
+  const failed = rows.filter((item) => item.icon_status === "failed").length;
+  const missing = rows.filter((item) => !isSupabaseStorageIconUrl(item.icon_url)).length;
+
+  return { total: rows.length, ready, missing, failed };
+}
+
+async function repairBookmarkIconsSequential(targets = [], options = {}) {
+  const { force = false, label = "图标" } = options;
+  const finalTargets = targets.filter((item) => item?.id && item?.url);
+
+  if (!finalTargets.length) {
+    showToast("没有需要修复的图标");
+    return;
+  }
+
+  let success = 0;
+  let skipped = 0;
+  const failures = [];
+
+  pauseRealtime();
+
+  try {
+    for (let index = 0; index < finalTargets.length; index += 1) {
+      const item = finalTargets[index];
+      showToast(`正在修复${label} ${index + 1}/${finalTargets.length}：${item.title || "未命名"}`);
+
+      const result = await fetchBookmarkIconWithEdge(item.id, item.url, { force, debug: true });
+
+      if (result.error || result.data?.ok === false) {
+        const reason = getIconRepairErrorMessage(result.data, result.error);
+        const attempts = getIconRepairAttemptSummary(result.data);
+        failures.push({
+          title: item.title || item.url || "未命名书签",
+          url: item.url || "",
+          reason,
+          attempts,
+        });
+        console.warn("图标修复失败：", item.title, result.error || result.data);
+      } else if (result.data?.skipped) {
+        skipped += 1;
+      } else {
+        success += 1;
+      }
+
+      await wait(800);
+    }
+  } finally {
+    await loadAllData({ quiet: true, renderAfter: true });
+    resumeRealtimeSoon(1200);
+  }
+
+  const failed = failures.length;
+  const message = `图标修复完成：成功 ${success} 个${skipped ? `，跳过 ${skipped} 个` : ""}，失败 ${failed} 个`;
+
+  if (failed) {
+    const detail = failures
+      .slice(0, 18)
+      .map((item, index) => {
+        const attemptText = item.attempts ? `\n   候选失败：${item.attempts}` : "";
+        return `${index + 1}. ${item.title}\n   原因：${item.reason}${attemptText}`;
+      })
+      .join("\n\n");
+
+    const moreText = failed > 18 ? `\n\n还有 ${failed - 18} 个失败项已省略，可在控制台查看完整日志。` : "";
+
+    showErrorDialog(
+      "部分图标没有自动修复成功",
+      message,
+      detail + moreText,
+      "这通常是目标网站 403/404、返回登录页、Cloudflare 风控、内部系统或 IP 面板导致的。公开网站可以稍后重试；内部/特殊网站建议后续使用“手动上传图标”。"
+    );
+  } else {
+    showToast(message);
+  }
+}
+
+async function repairMissingBookmarkIcons() {
+  if (!isAdmin()) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  const summary = getIconRepairSummary();
+  const targets = getIconRepairTargets("missing");
+
+  if (!targets.length) {
+    showToast("所有书签都已经有 Storage 图标");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `准备修复缺失图标：${targets.length} 个\n\n总书签：${summary.total}\n已有 Storage 图标：${summary.ready}\n缺失 / 旧外链图标：${summary.missing}\n失败记录：${summary.failed}\n\n修复过程会逐个调用 Edge Function，并强制把旧外链图标重新缓存到 Supabase Storage；不会请求前端外部 favicon。`
+  );
+
+  if (!confirmed) return;
+
+  await repairBookmarkIconsSequential(targets, { force: true, label: "缺失图标" });
+}
+
+async function refreshBookmarkIcon(id) {
+  const item = bookmarks.find((bookmark) => String(bookmark.id) === String(id));
+  if (!item) {
+    showToast("没有找到这个书签", "error");
+    return;
+  }
+
+  showToast(`正在修复图标：${item.title}`);
+  const result = await fetchBookmarkIconWithEdge(item.id, item.url, { force: true });
+
+  if (result.error || result.data?.ok === false) {
+    showToast(result.error?.message || result.data?.error || "图标修复失败", "error");
+    return;
+  }
+
+  await loadAllData({ quiet: true, renderAfter: true });
+  showToast("图标已更新");
+}
+
+async function batchRefreshIcons() {
+  if (!isAdmin()) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  const selectedItems = getSelectedBookmarks().filter((item) => item?.url);
+
+  if (!selectedItems.length) {
+    showToast("请先选择要修复图标的书签", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(`确定强制重新修复选中的 ${selectedItems.length} 个图标吗？`);
+  if (!confirmed) return;
+
+  await repairBookmarkIconsSequential(selectedItems, { force: true, label: "选中图标" });
+}
+
+function pickLocalIconFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico";
+    input.className = "hidden";
+
+    input.addEventListener("change", () => {
+      const file = input.files?.[0] || null;
+      input.remove();
+      resolve(file);
+    }, { once: true });
+
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      resolve(value.includes(",") ? value.split(",").pop() : value);
+    };
+    reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadBookmarkIcon(id) {
+  if (!isAdmin()) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  const item = bookmarks.find((bookmark) => String(bookmark.id) === String(id));
+  if (!item) {
+    showToast("没有找到这个书签", "error");
+    return;
+  }
+
+  const file = await pickLocalIconFile();
+  if (!file) return;
+
+  const maxSize = 1024 * 1024 * 1.5;
+  if (file.size > maxSize) {
+    showToast("图标文件太大，请控制在 1.5MB 以内", "error");
+    return;
+  }
+
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      showToast("连接 Supabase 失败", "error");
+      return;
+    }
+  }
+
+  try {
+    showToast(`正在上传图标：${item.title || "未命名"}`);
+    const fileBase64 = await readFileAsBase64(file);
+
+    const result = await withTimeout(
+      supabase.functions.invoke(ICON_EDGE_FUNCTION_NAME, {
+        body: {
+          mode: "upload",
+          bookmark_id: item.id,
+          url: item.url,
+          file_name: file.name || "manual-icon.png",
+          content_type: file.type || "application/octet-stream",
+          file_base64: fileBase64,
+          force: true,
+        },
+      }),
+      45000,
+      "上传图标"
+    );
+
+    if (result.error || result.data?.ok === false) {
+      const message = getIconRepairErrorMessage(result.data, result.error);
+      showErrorDialog(
+        "图标上传失败",
+        message || "上传图标没有完成。",
+        getIconRepairAttemptSummary(result.data),
+        "请确认文件是 png、jpg、webp、svg 或 ico，且大小不超过 1.5MB。"
+      );
       return;
     }
 
-    img.iconFallbackTimer = setTimeout(showFallback, 2000);
-    img.addEventListener("load", showIcon, { once: true });
-    img.addEventListener("error", showFallback, { once: true });
-  });
+    const nextIconUrl = String(result.data?.icon_url || "").trim();
+    if (!isSupabaseStorageIconUrl(nextIconUrl)) {
+      showToast("上传成功但返回地址异常", "error");
+      return;
+    }
+
+    forgetBrokenIcon(item.id, nextIconUrl);
+    await updateBookmarkIconCache(item.id, {
+      icon_url: nextIconUrl,
+      icon_status: "success",
+      icon_checked_at: new Date().toISOString(),
+      icon_storage_path: result.data.icon_storage_path || null,
+    });
+
+    await loadAllData({ quiet: true, renderAfter: true });
+    showToast("图标已上传并缓存到 Storage");
+  } catch (error) {
+    showErrorDialog("图标上传失败", getReadableError(error), "", "请稍后重试，或检查 Edge Function 是否已经部署 v8。由前端直接上传到 Storage 的方式未使用，Service Role 仍只在 Edge Function 内部。 ");
+  }
 }
 
 
@@ -2014,6 +2817,98 @@ async function batchReplaceCategories(categoryIds = []) {
   resumeRealtimeSoon();
 }
 
+async function saveBatchCategoryChange(event) {
+  event?.preventDefault?.();
+
+  if (!supabase || !isAdmin() || !batchMode) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  if (!selectedBookmarkIds.size) {
+    showToast("请先选择要处理的书签", "error");
+    return;
+  }
+
+  const mode = els.batchCategoryMode?.value || "add";
+  const categoryIds = getSelectedBatchCategoryIds();
+
+  if (!categoryIds.length) {
+    showToast("请至少选择一个分组", "error");
+    return;
+  }
+
+  if (els.batchCategorySaveBtn) {
+    els.batchCategorySaveBtn.disabled = true;
+    els.batchCategorySaveBtn.classList.add("is-loading");
+  }
+
+  try {
+    if (mode === "remove") {
+      await batchRemoveCategories(categoryIds);
+    } else if (mode === "replace") {
+      await batchReplaceCategories(categoryIds);
+    } else {
+      await batchAddCategories(categoryIds);
+    }
+
+    if (els.batchCategoryDialog?.open) {
+      els.batchCategoryDialog.close();
+    }
+  } finally {
+    if (els.batchCategorySaveBtn) {
+      els.batchCategorySaveBtn.disabled = false;
+      els.batchCategorySaveBtn.classList.remove("is-loading");
+    }
+  }
+}
+
+async function batchDeleteSelectedBookmarks() {
+  if (!supabase || !isAdmin() || !batchMode) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  const selectedItems = getSelectedBookmarks();
+  const ids = selectedItems.map((item) => String(item.id)).filter(Boolean);
+
+  if (!ids.length) {
+    showToast("请先选择要删除的书签", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(`确定把选中的 ${ids.length} 个书签移入回收站吗？`);
+  if (!confirmed) return;
+
+  ids.forEach((id) => {
+    const card = els.bookmarkGrid?.querySelector(`[data-card-id="${CSS.escape(id)}"]`);
+    card?.classList.add("is-removing");
+  });
+
+  await wait(180);
+  pauseRealtime();
+
+  const { error } = await supabase
+    .from("bookmarks")
+    .update({
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      is_active: false,
+    })
+    .in("id", ids);
+
+  if (error) {
+    resumeRealtimeSoon();
+    handleOperationError(error, "批量删除失败", "移动到回收站时出错。请确认 bookmarks 表存在 is_deleted、deleted_at、is_active 字段，并且管理员 RLS 允许更新。", { dialog: true });
+    return;
+  }
+
+  ids.forEach((id) => selectedBookmarkIds.delete(id));
+  showToast(`已将 ${ids.length} 个书签移入回收站`);
+  await loadBookmarks({ quiet: true });
+  resumeRealtimeSoon();
+}
+
 async function batchSetPinned(isPinned) {
   if (!supabase || !isAdmin() || !selectedBookmarkIds.size) return;
 
@@ -2077,159 +2972,37 @@ async function copyBookmarkLink(id) {
   }
 }
 
-async function refreshBookmarkIcon(id) {
-  if (!supabase || !isAdmin()) return;
 
-  const item = bookmarks.find((bookmark) => String(bookmark.id) === String(id));
-  if (!item) return;
-
-  pauseRealtime();
-
-  const { error } = await supabase
-    .from("bookmarks")
-    .update({
-      icon_url: getRefreshBookmarkIconUrl(item.url),
-      icon_status: "pending",
-      icon_checked_at: null,
-    })
-    .eq("id", item.id);
-
-  if (error) {
-    resumeRealtimeSoon();
-    showToast(error.message, "error");
-    return;
-  }
-
-  showToast("已刷新图标缓存");
-  await loadBookmarks({ quiet: true });
-  resumeRealtimeSoon();
-}
-
-async function batchRefreshIcons() {
-  if (!supabase || !isAdmin() || !selectedBookmarkIds.size) return;
-
-  const selected = getSelectedBookmarks();
-  if (!selected.length) return;
-
-  pauseRealtime();
-
-  for (const item of selected) {
-    const { error } = await supabase
-      .from("bookmarks")
-      .update({
-        icon_url: getRefreshBookmarkIconUrl(item.url),
-        icon_status: "pending",
-        icon_checked_at: null,
-      })
-      .eq("id", item.id);
-
-    if (error) {
-      resumeRealtimeSoon();
-      showToast(error.message, "error");
-      return;
-    }
-  }
-
-  showToast(`已刷新 ${selected.length} 个图标`);
-  selectedBookmarkIds.clear();
-  await loadBookmarks({ quiet: true });
-  resumeRealtimeSoon();
-}
-
-function exportSelectedBookmarks() {
-  const selected = getSelectedBookmarks();
-  if (!selected.length) {
-    showToast("请先选择书签", "error");
-    return;
-  }
-
-  exportBookmarksJson(selected, `bookmark-hub-selected-${new Date().toISOString().slice(0, 10)}.json`);
-}
-
-async function saveBatchCategoryChange(event) {
-  event.preventDefault();
-
-  if (!supabase || !isAdmin()) {
-    showToast(t("toast.noPermission"), "error");
-    return;
-  }
-
-  const categoryIds = getSelectedBatchCategoryIds();
-
-  if (!categoryIds.length) {
-    showToast("请至少选择一个分组", "error");
-    return;
-  }
-
-  const mode = els.batchCategoryMode.value;
-
-  els.batchCategorySaveBtn.disabled = true;
-  els.batchCategorySaveBtn.classList.add("is-loading");
-
-  if (mode === "remove") {
-    await batchRemoveCategories(categoryIds);
-  } else if (mode === "replace") {
-    await batchReplaceCategories(categoryIds);
-  } else {
-    await batchAddCategories(categoryIds);
-  }
-
-  els.batchCategorySaveBtn.disabled = false;
-  els.batchCategorySaveBtn.classList.remove("is-loading");
-  els.batchCategoryDialog.close();
-}
-
-async function batchDeleteSelectedBookmarks() {
-  if (!supabase || !isAdmin() || !selectedBookmarkIds.size) return;
-
-  const count = selectedBookmarkIds.size;
-  const ids = [...selectedBookmarkIds];
-  const confirmed = window.confirm(`确定把选中的 ${count} 个书签移入回收站吗？`);
-
-  if (!confirmed) return;
-
-  pauseRealtime();
-
-  const { error } = await supabase
-    .from("bookmarks")
-    .update({
-      is_deleted: true,
-      deleted_at: new Date().toISOString(),
-      is_active: false,
-    })
-    .in("id", ids);
-
-  if (error) {
-    resumeRealtimeSoon();
-    handleOperationError(error, "批量删除失败", "移动到回收站时出错。", { dialog: true });
-    return;
-  }
-
-  selectedBookmarkIds.clear();
-  showToast(`已把 ${count} 个书签移入回收站`);
-  await loadAllData({ quiet: true });
-  resumeRealtimeSoon();
-}
 
 function buildExportPayload(selectedItems = bookmarks) {
+  const normalizedItems = (selectedItems || []).map((item) => ({
+    title: item.title || "",
+    url: item.url || "",
+    description: item.description || "",
+    category: item.category || "",
+    categories: getBookmarkCategories(item),
+    category_names: getBookmarkCategories(item),
+    is_pinned: Boolean(item.is_pinned),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
+    open_count: Number.isFinite(Number(item.open_count)) ? Number(item.open_count) : 0,
+  }));
+
   return {
     version: 2,
     exported_at: new Date().toISOString(),
-    categories: getSortedCategories().map((category) => ({
-      name: category.name,
+    app: "bookmark-hub",
+    total: normalizedItems.length,
+    categories: getSelectableCategories().map((category) => ({
+      name: category.name || "",
       icon: normalizeCategoryIcon(category.icon, category.name),
-      sort_order: Number(category.sort_order ?? 0),
+      sort_order: Number.isFinite(Number(category.sort_order)) ? Number(category.sort_order) : 0,
     })),
-    bookmarks: selectedItems.map((item) => ({
-      title: item.title,
-      url: item.url,
-      description: item.description || "",
-      icon_url: item.icon_url || "",
-      icon_status: item.icon_status || "pending",
-      is_pinned: Boolean(item.is_pinned),
-      categories: getBookmarkCategories(item),
-    })),
+    bookmarks: normalizedItems,
   };
+}
+
+function getExportDateSuffix() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function exportBookmarksJson(selectedItems = bookmarks, filename = `bookmark-hub-backup-${new Date().toISOString().slice(0, 10)}.json`) {
@@ -2239,14 +3012,12 @@ function exportBookmarksJson(selectedItems = bookmarks, filename = `bookmark-hub
 }
 
 function exportBookmarksCsv(selectedItems = bookmarks) {
-  const header = ["title", "url", "description", "categories", "icon_url", "icon_status", "is_pinned"];
+  const header = ["title", "url", "description", "categories", "is_pinned"];
   const rows = selectedItems.map((item) => [
     item.title,
     item.url,
     item.description || "",
     getBookmarkCategories(item).join(" | "),
-    item.icon_url || "",
-    item.icon_status || "",
     item.is_pinned ? "true" : "false",
   ]);
 
@@ -2258,17 +3029,24 @@ function exportBookmarksCsv(selectedItems = bookmarks) {
   showToast("CSV 已导出");
 }
 
+function exportSelectedBookmarks() {
+  if (!selectedBookmarkIds.size) {
+    showToast("请先选择要导出的书签", "error");
+    return;
+  }
 
-function getTopFrequentBookmarks(source = bookmarks, limit = 4, excludeIds = new Set()) {
-  return [...source]
-    .filter((item) => Number(item.open_count || 0) > 0 && !excludeIds.has(String(item.id)))
-    .sort((a, b) => {
-      const diff = Number(b.open_count || 0) - Number(a.open_count || 0);
-      if (diff !== 0) return diff;
-      return String(b.last_opened_at || b.created_at || "").localeCompare(String(a.last_opened_at || a.created_at || ""));
-    })
-    .slice(0, limit);
+  const selectedItems = getSelectedBookmarks();
+
+  if (!selectedItems.length) {
+    showToast("没有可导出的书签", "error");
+    return;
+  }
+
+  const filename = `bookmark-hub-selected-${selectedItems.length}-${getExportDateSuffix()}.json`;
+  exportBookmarksJson(selectedItems, filename);
 }
+
+
 
 function openSystemCheckDialog() {
   if (!isAdmin()) {
@@ -2354,9 +3132,9 @@ async function runSystemCheck() {
 
   results.push(await runCheck(
     "bookmarks 表字段",
-    () => supabase.from("bookmarks").select("id,title,url,description,category,icon_url,icon_status,icon_checked_at,is_pinned,is_active,created_at").limit(1),
+    () => supabase.from("bookmarks").select("id,title,url,description,category,is_pinned,is_active,created_at,icon_url,icon_status,icon_checked_at,icon_storage_path").limit(1),
     "bookmarks 表字段完整。",
-    "缺字段时请运行最新的 supabase_upgrade_icons_batch_import.sql。"
+    "缺字段时请确认 bookmarks 表至少包含 id、title、url、description、category、is_pinned、is_active、created_at，以及 icon_url、icon_status、icon_checked_at、icon_storage_path。"
   ));
 
   results.push(await runCheck(
@@ -2480,8 +3258,6 @@ function normalizeImportedBookmarks(payload, filename = "") {
         title: String(item.title || item.name || "").trim(),
         url: normalizeUrl(String(item.url || item.href || "").trim()),
         description: String(item.description || item.desc || "").trim(),
-        icon_url: String(item.icon_url || "").trim(),
-        icon_status: String(item.icon_status || "pending").trim() || "pending",
         is_pinned: Boolean(item.is_pinned),
         categories: uniqueCategoryNames(categories),
       };
@@ -2695,8 +3471,6 @@ async function importPreparedBookmarks() {
         url: normalizeUrl(item.url),
         description: item.description || "",
         category: firstCategoryName,
-        icon_url: item.icon_url || getBookmarkIconUrl(item.url),
-        icon_status: item.icon_url ? (item.icon_status || "ok") : "pending",
         is_pinned: Boolean(item.is_pinned),
         is_active: true,
       };
@@ -2838,21 +3612,47 @@ async function loadSiteTexts() {
   const defaultTextMap = new Map(allDefaults.map((row) => [row.key, row.value]));
   const editableMap = new Map(getEditableTextObjects().map((row) => [row.key, row]));
 
-  if (!supabase) {
+  if (!isConfigured) {
     siteTextRows = [...editableMap.values()];
     texts = Object.fromEntries(allDefaults.map((row) => [row.key, row.value]));
     applySiteTexts();
     return;
   }
 
-  const { data, error } = await runSupabaseQuery(
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      siteTextRows = [...editableMap.values()];
+      texts = { ...texts, ...Object.fromEntries(allDefaults.map((row) => [row.key, row.value])) };
+      applySiteTexts();
+      return;
+    }
+  }
+
+  let { data, error } = await runSupabaseQuery(
     supabase
       .from("site_texts")
       .select("key,value,description")
       .in("key", EDITABLE_TEXT_KEY_LIST)
       .order("key", { ascending: true }),
-    "读取页面文案"
+    "读取页面文案",
+    TEXT_REQUEST_TIMEOUT
   );
+
+  if (error && getReadableError(error).toLowerCase().includes("description")) {
+    const fallbackResult = await runSupabaseQuery(
+      supabase
+        .from("site_texts")
+        .select("key,value")
+        .in("key", EDITABLE_TEXT_KEY_LIST)
+        .order("key", { ascending: true }),
+      "读取基础页面文案",
+      TEXT_REQUEST_TIMEOUT
+    );
+
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
 
   if (!error) {
     for (const row of data ?? []) {
@@ -2873,47 +3673,65 @@ async function loadSiteTexts() {
   siteTextRows = [...editableMap.values()];
   texts = Object.fromEntries(defaultTextMap.entries());
   applySiteTexts();
+  saveAppCache();
 }
 
 async function saveSiteTextRowsWithFallback(rows) {
-  const upsertResult = await supabase
-    .from("site_texts")
-    .upsert(rows, { onConflict: "key" });
-
-  if (!upsertResult.error) {
-    return { error: null };
-  }
-
-  const fallbackRows = rows.map((row) => ({
+  const fullRows = rows.map((row) => ({
     key: row.key,
     value: row.value,
     description: row.description,
   }));
+  const simpleRows = rows.map((row) => ({
+    key: row.key,
+    value: row.value,
+  }));
 
-  for (const row of fallbackRows) {
-    const updateResult = await supabase
+  const trySaveRows = async (targetRows) => {
+    const upsertResult = await supabase
       .from("site_texts")
-      .update(row)
-      .eq("key", row.key)
-      .select("key");
+      .upsert(targetRows, { onConflict: "key" });
 
-    if (updateResult.error) {
-      return { error: updateResult.error };
+    if (!upsertResult.error) {
+      return { error: null };
     }
 
-    if (!updateResult.data?.length) {
-      const insertResult = await supabase
+    for (const row of targetRows) {
+      const updateResult = await supabase
         .from("site_texts")
-        .insert(row);
+        .update(row)
+        .eq("key", row.key)
+        .select("key");
 
-      if (insertResult.error) {
-        return { error: insertResult.error };
+      if (updateResult.error) {
+        return { error: updateResult.error };
+      }
+
+      if (!updateResult.data?.length) {
+        const insertResult = await supabase
+          .from("site_texts")
+          .insert(row);
+
+        if (insertResult.error) {
+          return { error: insertResult.error };
+        }
       }
     }
+
+    return { error: null };
+  };
+
+  const fullResult = await trySaveRows(fullRows);
+  if (!fullResult.error) return fullResult;
+
+  const message = getReadableError(fullResult.error).toLowerCase();
+  if (message.includes("description") || message.includes("column")) {
+    return trySaveRows(simpleRows);
   }
 
-  return { error: null };
+  return fullResult;
 }
+
 
 async function saveSiteTexts(event) {
   event.preventDefault();
@@ -2988,9 +3806,14 @@ async function saveSiteTexts(event) {
 async function loadSession(options = {}) {
   const { renderAfter = true } = options;
 
-  if (!supabase) return;
+  if (!isConfigured) return;
 
-  const { data, error } = await runSupabaseQuery(supabase.auth.getSession(), "读取登录状态", 9000);
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) return;
+  }
+
+  const { data, error } = await runSupabaseQuery(supabase.auth.getSession(), "读取登录状态", AUTH_REQUEST_TIMEOUT);
 
   if (error) {
     showToast(error.message, "error");
@@ -3009,7 +3832,7 @@ async function loadSession(options = {}) {
 async function loadBookmarks(options = {}) {
   const { renderAfter = true, quiet = true } = options;
 
-  if (!supabase) {
+  if (!isConfigured) {
     bookmarks = [];
     bookmarksDataSignature = "";
     els.setupNotice.classList.remove("hidden");
@@ -3018,33 +3841,26 @@ async function loadBookmarks(options = {}) {
     return true;
   }
 
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) return false;
+  }
+
   const enhancedSelect = [
     "id",
     "title",
     "url",
     "description",
     "category",
-    "icon_url",
-    "icon_status",
-    "icon_checked_at",
     "is_pinned",
-    "open_count",
-    "last_opened_at",
     "is_deleted",
     "deleted_at",
     "is_active",
     "created_at",
-  ].join(",");
-
-  const iconOnlySelect = [
-    "id",
-    "title",
-    "url",
-    "description",
-    "category",
     "icon_url",
-    "is_active",
-    "created_at",
+    "icon_status",
+    "icon_checked_at",
+    "icon_storage_path",
   ].join(",");
 
   const baseSelect = [
@@ -3074,27 +3890,11 @@ async function loadBookmarks(options = {}) {
   data = enhancedResult.data;
   error = enhancedResult.error;
 
-  // 如果新字段暂时没有进入 PostgREST schema cache，或者数据库还没补齐字段，退回旧字段读取。
-  // 这样页面至少能先显示原有书签，不会一直停在骨架屏。
-  if (error) {
+  // 如果 is_pinned / is_deleted 等新字段暂时没有进入 PostgREST schema cache，退回最小字段读取。
+  // 只读取 Supabase Storage 缓存图标字段，不再触发任何前端外部 favicon 请求。
+  if (error && shouldTrySchemaFallback(error)) {
     enhancedFieldsAvailable = false;
-    console.warn("enhanced bookmarks query failed, fallback to icon-only query", error);
-
-    const iconFallbackResult = await runSupabaseQuery(
-      supabase
-        .from("bookmarks")
-        .select(iconOnlySelect)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false }),
-      "读取基础书签"
-    );
-
-    data = iconFallbackResult.data;
-    error = iconFallbackResult.error;
-  }
-
-  if (error) {
-    console.warn("icon-only bookmarks query failed, fallback to minimal query", error);
+    console.warn("enhanced bookmarks query failed, fallback to minimal query", error);
 
     const minimalResult = await runSupabaseQuery(
       supabase
@@ -3110,17 +3910,14 @@ async function loadBookmarks(options = {}) {
   }
 
   if (error) {
-    bookmarks = [];
-    bookmarksDataSignature = "";
     setRealtimeStatus("error", t("sync.readError"));
     handleOperationError(
       error,
       "读取书签失败",
       "前端已自动尝试新结构、旧结构和最小字段读取，但仍然失败。请确认 bookmarks 表存在 id、title、url、description、category、is_active、created_at 字段，且 anon 角色拥有读取权限。",
-      { dialog: true }
+      { dialog: !initialRemoteLoading }
     );
-    if (renderAfter) safeRender(quiet);
-    return true;
+    return false;
   }
 
   if (!enhancedFieldsAvailable) {
@@ -3180,12 +3977,11 @@ async function loadBookmarks(options = {}) {
 
       return {
         ...item,
-        icon_url: item.icon_url || getBookmarkIconUrl(item.url),
-        icon_status: item.icon_status || (item.icon_url ? "ok" : "pending"),
+        icon_url: item.icon_url || "",
+        icon_status: item.icon_status || "",
         icon_checked_at: item.icon_checked_at || null,
+        icon_storage_path: item.icon_storage_path || null,
         is_pinned: Boolean(item.is_pinned),
-        open_count: Number(item.open_count || 0),
-        last_opened_at: item.last_opened_at || null,
         is_deleted: Boolean(item.is_deleted),
         deleted_at: item.deleted_at || null,
         category_ids: uniqueIds(linkedCategories.map((category) => category.id).filter(Boolean)),
@@ -3203,6 +3999,7 @@ async function loadBookmarks(options = {}) {
 
   bookmarks = nextRows;
   bookmarksDataSignature = nextSignature;
+  saveAppCache();
 
   if (changed && renderAfter) {
     safeRender(quiet);
@@ -3214,11 +4011,16 @@ async function loadBookmarks(options = {}) {
 async function loadCategories(options = {}) {
   const { renderAfter = true, quiet = true } = options;
 
-  if (!supabase) {
+  if (!isConfigured) {
     categories = [];
     categoriesDataSignature = "";
     if (renderAfter) safeRender(quiet);
     return true;
+  }
+
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) return false;
   }
 
   let data = null;
@@ -3238,7 +4040,7 @@ async function loadCategories(options = {}) {
   error = enhancedResult.error;
 
   // 兼容旧数据库 / PostgREST schema cache 未及时刷新的情况：如果 icon 字段暂时读不到，退回基础字段。
-  if (error) {
+  if (error && shouldTrySchemaFallback(error)) {
     console.warn("enhanced categories query failed, fallback to base query", error);
 
     const fallbackResult = await runSupabaseQuery(
@@ -3256,17 +4058,14 @@ async function loadCategories(options = {}) {
   }
 
   if (error) {
-    categories = [];
-    categoriesDataSignature = "";
     setRealtimeStatus("error", t("sync.readError"));
     handleOperationError(
       error,
       "读取分组失败",
       "请确认 categories 表存在 id、name、sort_order、is_active、created_at 字段，并且 anon 角色拥有读取权限。",
-      { dialog: true }
+      { dialog: !initialRemoteLoading }
     );
-    if (renderAfter) safeRender(quiet);
-    return true;
+    return false;
   }
 
   const nextRows = (data ?? [])
@@ -3280,6 +4079,7 @@ async function loadCategories(options = {}) {
 
   categories = nextRows;
   categoriesDataSignature = nextSignature;
+  saveAppCache();
 
   if (changed && renderAfter) {
     safeRender(quiet);
@@ -3288,20 +4088,215 @@ async function loadCategories(options = {}) {
   return changed;
 }
 
+
+function normalizeCategoryRows(rawRows = []) {
+  return (rawRows ?? [])
+    .filter((category) => category?.name && !isReservedCategoryName(category.name))
+    .map((category) => ({
+      ...category,
+      icon: normalizeCategoryIcon(category.icon, category.name),
+    }));
+}
+
+function normalizeBookmarkRows(rawRows = [], linkRows = [], categoryRows = categories) {
+  const categoryById = new Map((categoryRows || []).map((category) => [String(category.id), category]));
+  const categoriesByName = new Map((categoryRows || []).map((category) => [normalizeCategoryName(category.name).toLowerCase(), category]));
+  const linksByBookmarkId = new Map();
+
+  for (const link of linkRows ?? []) {
+    const bookmarkId = String(link.bookmark_id || "");
+    const categoryId = String(link.category_id || "");
+    if (!bookmarkId || !categoryId) continue;
+    const arr = linksByBookmarkId.get(bookmarkId) || [];
+    arr.push(categoryId);
+    linksByBookmarkId.set(bookmarkId, arr);
+  }
+
+  return (rawRows ?? [])
+    .filter((item) => item && item.is_active !== false && !item.is_deleted)
+    .map((item) => {
+      const linkedCategoryIds = uniqueIds(linksByBookmarkId.get(String(item.id)) || []);
+      let linkedCategories = linkedCategoryIds
+        .map((id) => categoryById.get(String(id)))
+        .filter((category) => category && category.is_active !== false && !isReservedCategoryName(category.name));
+
+      if (linkedCategories.length === 0 && item.category && !isReservedCategoryName(item.category)) {
+        const fallback = categoriesByName.get(normalizeCategoryName(item.category).toLowerCase());
+        if (fallback) {
+          linkedCategories = [fallback];
+        } else {
+          linkedCategories = [{ id: "", name: item.category, icon: "paw-cat", sort_order: 999999, is_active: true }];
+        }
+      }
+
+      linkedCategories = linkedCategories.sort((a, b) => {
+        const sa = Number(a.sort_order ?? 0);
+        const sb = Number(b.sort_order ?? 0);
+        if (sa !== sb) return sa - sb;
+        return String(a.name).localeCompare(String(b.name), "zh-CN");
+      });
+
+      return {
+        ...item,
+        icon_url: item.icon_url || "",
+        icon_status: item.icon_status || "",
+        icon_checked_at: item.icon_checked_at || null,
+        icon_storage_path: item.icon_storage_path || null,
+        is_pinned: Boolean(item.is_pinned),
+        is_deleted: Boolean(item.is_deleted),
+        deleted_at: item.deleted_at || null,
+        category_ids: uniqueIds(linkedCategories.map((category) => category.id).filter(Boolean)),
+        category_names: uniqueCategoryNames(linkedCategories.map((category) => category.name)),
+      };
+    })
+    .sort((a, b) => {
+      const pa = a.is_pinned ? 1 : 0;
+      const pb = b.is_pinned ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+}
+
+async function queryCategoryRowsFast() {
+  let result = await runSupabaseQuery(
+    supabase
+      .from("categories")
+      .select("id,name,icon,sort_order,is_active,created_at")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    "读取分组",
+    DB_REQUEST_TIMEOUT
+  );
+
+  if (result.error && shouldTrySchemaFallback(result.error)) {
+    result = await runSupabaseQuery(
+      supabase
+        .from("categories")
+        .select("id,name,sort_order,is_active,created_at")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      "读取基础分组",
+      DB_REQUEST_TIMEOUT
+    );
+  }
+
+  return result;
+}
+
+async function queryBookmarkRowsFast() {
+  let result = await runSupabaseQuery(
+    supabase
+      .from("bookmarks")
+      .select("id,title,url,description,category,is_pinned,is_deleted,deleted_at,is_active,created_at,icon_url,icon_status,icon_checked_at,icon_storage_path")
+      .eq("is_active", true)
+      .or("is_deleted.is.null,is_deleted.eq.false")
+      .order("created_at", { ascending: false }),
+    "读取书签",
+    DB_REQUEST_TIMEOUT
+  );
+
+  if (result.error && shouldTrySchemaFallback(result.error)) {
+    result = await runSupabaseQuery(
+      supabase
+        .from("bookmarks")
+        .select("id,title,url,description,category,is_active,created_at")
+        .eq("is_active", true)
+        .order("created_at", { ascending: false }),
+      "读取最小书签",
+      DB_REQUEST_TIMEOUT
+    );
+  }
+
+  return result;
+}
+
+async function queryBookmarkLinksFast() {
+  const result = await runSupabaseQuery(
+    supabase
+      .from("bookmark_categories")
+      .select("bookmark_id,category_id"),
+    "读取书签分组关联",
+    Math.min(DB_REQUEST_TIMEOUT, 9000)
+  );
+
+  if (result.error) {
+    console.warn("bookmark_categories read failed, fallback to bookmarks.category", result.error);
+    return { data: [], error: result.error };
+  }
+
+  return result;
+}
+
 async function loadAllData(options = {}) {
   const { quiet = true, renderAfter = true } = options;
 
-  // 先读取分组，再读取书签与 bookmark_categories。这样不依赖 PostgREST 的嵌套关系，
-  // 即使数据库关联缓存暂时没刷新，页面也能正常显示。
-  const categoriesChanged = await loadCategories({ renderAfter: false });
-  const bookmarksChanged = await loadBookmarks({ renderAfter: false });
-  const changed = bookmarksChanged || categoriesChanged;
+  if (isConfigured && !supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      setRealtimeStatus("error", "连接较慢");
+      return false;
+    }
+  }
+
+  // 快速读取：分组、书签、关联表并发请求，减少 Supabase 慢网络下的串行等待。
+  // 只读取 Storage 缓存图标字段，不在前端请求任何 favicon 外链。
+  const [categoryResult, bookmarkResult, linkResult] = await Promise.all([
+    queryCategoryRowsFast(),
+    queryBookmarkRowsFast(),
+    queryBookmarkLinksFast(),
+  ]);
+
+  let changed = false;
+
+  if (categoryResult.error) {
+    setRealtimeStatus("error", t("sync.partial"));
+    handleOperationError(
+      categoryResult.error,
+      "读取分组失败",
+      "页面会继续显示缓存或书签数据，后台会自动重试。请确认 categories 表权限和网络状态。",
+      { dialog: !initialRemoteLoading }
+    );
+  } else {
+    const nextCategories = normalizeCategoryRows(categoryResult.data);
+    const nextCategorySignature = getCategoriesDataSignature(nextCategories);
+    if (nextCategorySignature !== categoriesDataSignature) {
+      categories = nextCategories;
+      categoriesDataSignature = nextCategorySignature;
+      changed = true;
+    }
+  }
+
+  if (bookmarkResult.error) {
+    setRealtimeStatus("error", t("sync.readError"));
+    handleOperationError(
+      bookmarkResult.error,
+      "读取书签失败",
+      "页面会继续显示本地缓存，后台会自动重试。请确认 bookmarks 表权限和网络状态。",
+      { dialog: !initialRemoteLoading }
+    );
+  } else {
+    if (linkResult.error) {
+      setRealtimeStatus("error", t("sync.partial"));
+    }
+
+    const nextBookmarks = normalizeBookmarkRows(bookmarkResult.data, linkResult.data || [], categories);
+    const nextBookmarkSignature = getBookmarksDataSignature(nextBookmarks);
+    if (nextBookmarkSignature !== bookmarksDataSignature) {
+      bookmarks = nextBookmarks;
+      bookmarksDataSignature = nextBookmarkSignature;
+      changed = true;
+    }
+  }
+
+  saveAppCache();
 
   if (renderAfter && changed) {
     safeRender(quiet);
   }
 
-  return changed;
+  return !categoryResult.error || !bookmarkResult.error;
 }
 
 function subscribeRealtime() {
@@ -3350,8 +4345,18 @@ function subscribeRealtime() {
         setRealtimeStatus("online", t("sync.online"));
       }
 
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
         setRealtimeStatus("error", t("sync.readError"));
+        setTimeout(() => {
+          if (!realtimePaused) subscribeRealtime();
+        }, 2200);
+      }
+
+      if (status === "CLOSED" && !realtimePaused) {
+        setRealtimeStatus("error", t("sync.partial"));
+        setTimeout(() => {
+          if (!realtimePaused) subscribeRealtime();
+        }, 2800);
       }
     });
 
@@ -3373,19 +4378,30 @@ async function saveBookmark() {
 
   const id = els.bookmarkId.value;
   const categoryPayload = getBookmarkCategoryPayload(selectedCategoryIds);
+  const existingBookmark = id
+    ? bookmarks.find((item) => String(item.id) === String(id))
+    : null;
+  const normalizedUrl = normalizeUrl(els.urlInput.value);
+  const urlChanged = !existingBookmark || normalizedUrlKey(existingBookmark.url) !== normalizedUrlKey(normalizedUrl);
 
   const payload = {
     title: els.titleInput.value.trim(),
-    url: normalizeUrl(els.urlInput.value),
+    url: normalizedUrl,
     description: els.descriptionInput.value.trim(),
-    icon_url: getBookmarkIconUrl(els.urlInput.value),
-    icon_status: "pending",
-    icon_checked_at: null,
     ...categoryPayload,
     is_deleted: false,
     deleted_at: null,
     is_active: true,
   };
+
+  if (urlChanged) {
+    Object.assign(payload, {
+      icon_url: null,
+      icon_status: "pending",
+      icon_checked_at: null,
+      icon_storage_path: null,
+    });
+  }
 
   try {
     const parsed = new URL(payload.url);
@@ -3428,6 +4444,7 @@ async function saveBookmark() {
 
   await loadBookmarks({ quiet: true });
   resumeRealtimeSoon();
+
 
   setTimeout(() => {
     highlightBookmarkId = null;
@@ -3604,28 +4621,11 @@ async function emptyTrash() {
   resumeRealtimeSoon();
 }
 
-async function recordBookmarkOpen(id) {
-  if (!supabase || !id) return;
-  const item = bookmarks.find((bookmark) => String(bookmark.id) === String(id));
-  if (!item) return;
-
-  const nextCount = Number(item.open_count || 0) + 1;
-  const openedAt = new Date().toISOString();
-  item.open_count = nextCount;
-  item.last_opened_at = openedAt;
-
-  await supabase
-    .from("bookmarks")
-    .update({ open_count: nextCount, last_opened_at: openedAt })
-    .eq("id", id);
-}
-
 function openBookmarkById(id) {
   const item = bookmarks.find((bookmark) => String(bookmark.id) === String(id));
   if (!item?.url) return;
 
   window.open(normalizeUrl(item.url), "_blank", "noopener,noreferrer");
-  recordBookmarkOpen(item.id);
 }
 
 async function saveCategory() {
@@ -3812,9 +4812,18 @@ async function reorderCategories(dragId, targetId, position = "after") {
 async function login(event) {
   event.preventDefault();
 
-  if (!supabase) {
+  if (!isConfigured) {
     showToast(t("sync.notConfigured"), "error");
     return;
+  }
+
+  if (!supabase) {
+    showToast("正在连接数据库，请稍等...", "normal");
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      showToast("数据库连接较慢，请稍后再试", "error");
+      return;
+    }
   }
 
   const email = els.loginEmail.value.trim();
@@ -3963,13 +4972,9 @@ function handleGlobalShortcuts(event) {
 }
 
 function bindEvents() {
-  setBookmarkView(localStorage.getItem("bookmark-view") || "grid", false);
-
-  document.querySelectorAll("[data-view-mode]").forEach((button) => {
-    button.addEventListener("click", () => {
-      setBookmarkView(button.dataset.viewMode);
-    });
-  });
+  localStorage.removeItem("bookmark-view");
+  setBookmarkView("grid", false);
+  activateBookmarkIcons();
 
   window.addEventListener("keydown", handleGlobalShortcuts);
 
@@ -3978,9 +4983,11 @@ function bindEvents() {
   });
 
   els.textOpenBtn.addEventListener("click", openTextDialog);
+  els.groupOpenBtn?.addEventListener("click", openCurrentVisibleBookmarks);
   els.importExportBtn?.addEventListener("click", openImportExportDialog);
   els.trashOpenBtn?.addEventListener("click", openTrashDialog);
   els.systemCheckBtn?.addEventListener("click", openSystemCheckDialog);
+  els.repairIconBtn?.addEventListener("click", repairMissingBookmarkIcons);
   els.systemCheckRunBtn?.addEventListener("click", runSystemCheck);
   els.trashEmptyBtn?.addEventListener("click", emptyTrash);
   els.trashList?.addEventListener("click", async (event) => {
@@ -4078,6 +5085,11 @@ function bindEvents() {
   });
 
   els.searchInput.addEventListener("input", render);
+  els.searchScopeTabs?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-search-scope]");
+    if (!button) return;
+    setSearchScope(button.dataset.searchScope);
+  });
 
   els.groupList.addEventListener("scroll", updateCategoryIndicator);
   window.addEventListener("resize", updateCategoryIndicator);
@@ -4213,12 +5225,13 @@ function bindEvents() {
     }
 
     const menuToggle = event.target.closest("[data-card-menu-toggle]");
-    const refreshIconBtn = event.target.closest("[data-refresh-icon]");
     const pinBtn = event.target.closest("[data-pin]");
     const editBtn = event.target.closest("[data-edit]");
     const copyLinkBtn = event.target.closest("[data-copy-link]");
+    const refreshIconBtn = event.target.closest("[data-refresh-icon]");
+    const uploadIconBtn = event.target.closest("[data-upload-icon]");
     const deleteBtn = event.target.closest("[data-delete]");
-    const card = event.target.closest("[data-open-url]");
+    const card = event.target.closest(".card[data-card-id]");
 
     if (menuToggle) {
       event.preventDefault();
@@ -4227,13 +5240,6 @@ function bindEvents() {
       return;
     }
 
-    if (refreshIconBtn) {
-      event.preventDefault();
-      event.stopPropagation();
-      closeCardMenus();
-      await refreshBookmarkIcon(refreshIconBtn.dataset.refreshIcon);
-      return;
-    }
 
     if (pinBtn) {
       event.preventDefault();
@@ -4261,6 +5267,22 @@ function bindEvents() {
       return;
     }
 
+    if (refreshIconBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCardMenus();
+      await refreshBookmarkIcon(refreshIconBtn.dataset.refreshIcon);
+      return;
+    }
+
+    if (uploadIconBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCardMenus();
+      await uploadBookmarkIcon(uploadIconBtn.dataset.uploadIcon);
+      return;
+    }
+
     if (deleteBtn) {
       event.preventDefault();
       event.stopPropagation();
@@ -4270,7 +5292,7 @@ function bindEvents() {
       return;
     }
 
-    if (card && !isAdmin()) {
+    if (card && !event.target.closest("button, a, input, label, textarea, select, .card-menu")) {
       openBookmarkById(card.dataset.cardId);
     }
   });
@@ -4278,8 +5300,8 @@ function bindEvents() {
   els.bookmarkGrid.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
 
-    const card = event.target.closest("[data-open-url]");
-    if (!card || isAdmin()) return;
+    const card = event.target.closest(".card[data-card-id]");
+    if (!card || batchMode) return;
 
     event.preventDefault();
 
@@ -4368,53 +5390,76 @@ async function init() {
   bindEvents();
   initLottieAnimations();
 
+  const hasCache = restoreAppCache();
+  if (hasCache) {
+    finishInitialPaint(false);
+  }
+
   if (!isConfigured) {
     bookmarks = [];
     categories = [];
     els.setupNotice.classList.remove("hidden");
     setRealtimeStatus("error", t("sync.notConfigured"));
-    finishLoadingSkeleton();
-    safeRender(false);
+    finishInitialPaint(false);
     return;
   }
 
   setRealtimeStatus("online", t("sync.connecting"));
 
+  let visibleTimer = null;
+  let remoteLoaded = false;
+  initialRemoteLoading = true;
+
+  visibleTimer = setTimeout(() => {
+    if (remoteLoaded || !isInitialLoading) return;
+
+    setRealtimeStatus("error", "连接较慢，先显示本地页面");
+    finishInitialPaint(false);
+  }, INITIAL_VISIBLE_TIMEOUT);
+
   try {
-    const results = await withTimeout(
-      Promise.allSettled([
-        loadSiteTexts(),
-        loadSession({ renderAfter: false }),
-        loadAllData({ quiet: false, renderAfter: false }),
-      ]),
-      16000,
-      "初始化数据"
-    );
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+
+    if (!client) {
+      throw supabaseLoadError || timeoutError("加载 Supabase 客户端");
+    }
+
+    const results = await Promise.allSettled([
+      loadSiteTexts(),
+      loadAllData({ quiet: false, renderAfter: false }),
+    ]);
+
+    loadSession({ renderAfter: true }).catch((error) => {
+      console.warn("初始化登录状态读取失败：", error);
+    });
 
     const rejected = results.find((result) => result.status === "rejected");
-    if (rejected) {
-      console.error("init task failed", rejected.reason);
+    const hasDataSuccess = results.some((result) => result.status === "fulfilled" && result.value !== false);
+
+    if (rejected || !hasDataSuccess) {
+      console.error("init task failed", rejected?.reason || "no data task success");
       setRealtimeStatus("error", t("sync.partial"));
       handleOperationError(
-        rejected.reason,
+        rejected?.reason || new Error("初始化数据读取暂未成功"),
         "初始化部分失败",
-        "页面会先显示已读取到的内容。请打开浏览器控制台查看红色错误，或运行最新数据库修复 SQL 后强制刷新。",
+        "页面已经先显示出来，后台会自动继续重试数据库连接，不需要反复强制刷新。",
         { dialog: false }
       );
+      retryRemoteLoadSoon(4500);
+    } else {
+      remoteRetryCount = 0;
+      setRealtimeStatus("online", t("sync.online"));
     }
   } catch (error) {
     console.error("init timeout or failed", error);
-    setRealtimeStatus("error", t("sync.readError"));
-    handleOperationError(
-      error,
-      "数据库连接超时",
-      "前端已经停止骨架屏，避免页面一直卡住。请确认当前网络能访问 Supabase，或打开浏览器控制台把红色错误发给我。",
-      { dialog: true }
-    );
+    setRealtimeStatus("error", "连接较慢");
+    showToast("数据库连接较慢，页面已先显示本地内容", "error");
+    retryRemoteLoadSoon(4500);
   } finally {
-    updateAdminVisibility();
-    finishLoadingSkeleton();
-    safeRender(false);
+    remoteLoaded = true;
+    initialRemoteLoading = false;
+    clearTimeout(visibleTimer);
+    finishInitialPaint(false);
     subscribeRealtime();
   }
 }
