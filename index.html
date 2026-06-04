@@ -54,26 +54,33 @@
 
       <main class="main">
         <header class="topbar">
-          <label id="searchShell" class="search-shell">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+          <div class="topbar-main">
+            <label id="searchShell" class="search-shell search-name-only">
+              <svg class="search-icon" viewBox="0 0 24 24" fill="none">
+                <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6ZM16.2 16.2l4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
 
-            <input id="searchInput" type="search" autocomplete="off" />
-            <div id="searchScopeTabs" class="search-scope-tabs" role="group" aria-label="选择搜索范围">
-              <button class="scope-chip is-active" type="button" data-search-scope="all" aria-pressed="true">全部</button>
-              <button class="scope-chip" type="button" data-search-scope="title" aria-pressed="false">名称</button>
-              <button class="scope-chip" type="button" data-search-scope="description" aria-pressed="false">简介</button>
-              <button class="scope-chip" type="button" data-search-scope="url" aria-pressed="false">链接</button>
-              <button class="scope-chip" type="button" data-search-scope="category" aria-pressed="false">分组</button>
-            </div>
-            <span id="searchFeedback" class="search-feedback"></span>
-          </label>
+              <input id="searchInput" type="search" autocomplete="off" />
+              <div id="groupFilterDropdown" class="group-filter-shell custom-group-filter" aria-label="按分组筛选">
+                <span class="group-filter-caption">分组</span>
+                <button id="groupFilterButton" class="group-filter-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span id="groupFilterLabel">全部分组</span>
+                  <span class="group-filter-count">0</span>
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6.2 8 10l4-3.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <div id="groupFilterMenu" class="group-filter-menu" role="listbox" aria-label="选择分组"></div>
+                <input id="groupFilterSelect" type="hidden" value="全部" />
+              </div>
+              <span id="searchFeedback" class="search-feedback"></span>
+            </label>
+
+            <div id="cardDensityControl" class="top-density-control" aria-label="卡片密度切换"></div>
+          </div>
 
           <div class="top-actions">
-            <button id="loginOpenBtn" class="ghost-btn top-login-btn" type="button"></button>
-            <button id="logoutBtn" class="ghost-btn top-login-btn hidden" type="button"></button>
-            <button id="addOpenBtn" class="primary-btn hidden" type="button"></button>
+            <button id="logoutBtn" class="hidden" type="button" aria-hidden="true" tabindex="-1" style="display:none!important"></button>
 
             <button id="themeToggle" class="icon-btn theme-btn" type="button" aria-label="切换主题">
               <span class="theme-knob">
@@ -85,6 +92,8 @@
                 </svg>
               </span>
             </button>
+
+            <button id="loginOpenBtn" class="top-admin-btn" type="button">管理员登录</button>
           </div>
         </header>
 
@@ -100,11 +109,12 @@
                 <span id="realtimeDot" class="dot"></span>
                 <span id="syncStatus"></span>
               </div>
-              <div id="adminBadge" class="badge admin-badge hidden"></div>
+              <button id="adminBadge" class="badge admin-badge admin-mode-badge" type="button"></button>
             </div>
 
             <div class="hero-action-panel">
               <div class="hero-action-group hero-action-primary" data-group-label="常用操作">
+                <button id="addOpenBtn" class="primary-btn hero-add-btn hidden" type="button"></button>
                 <button id="groupOpenBtn" class="ghost-btn group-open-btn" type="button">一键打开本组</button>
                 <button id="batchToggleBtn" class="ghost-btn batch-toggle-btn hidden" type="button" aria-pressed="false">批量管理</button>
                 <button id="repairIconBtn" class="ghost-btn hidden" type="button">修复图标</button>
