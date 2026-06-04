@@ -1,3 +1,12 @@
+/*
+  书签小屋 app.js（整理版 v32）
+  说明：这个文件按功能区整理，注释尽量用大白话写。
+  注意：Supabase anon key 可以放前端；service_role key 绝对不能放这里。
+*/
+
+// =========================
+// 1. 基础配置：项目地址、管理员、功能开关
+// =========================
 const SUPABASE_URL = "https://bmbkahvhqdhbrzbyonuu.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtYmthaHZocWRoYnJ6YnlvbnV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwOTY2MTksImV4cCI6MjA5MjY3MjYxOX0.RW09_EOPzuPHNPOdD2yb44iCOSksqkwRr1mBXEMokcE";
 const ADMIN_EMAIL = "2565667747@qq.com";
@@ -30,16 +39,58 @@ const IMPORT_BATCH_SIZE = 40;
 
 const SEARCH_SCOPE_LABELS = {
   title: "名称",
-  description: "简介",
-  url: "链接",
-  category: "分组",
-  all: "全部",
 };
-const DEFAULT_SEARCH_SCOPE = "all";
+const DEFAULT_SEARCH_SCOPE = "title";
 const SEARCH_SCOPE_VERSION_KEY = "bookmark-search-scope-version-v2";
+const CARD_DENSITY_STORAGE_KEY = "bookmark-card-density-v1";
+const DEFAULT_CARD_DENSITY = "comfortable";
+const CARD_DENSITY_OPTIONS = [
+  { key: "comfortable", label: "舒适", desc: "大卡片，更适合慢慢浏览" },
+  { key: "compact", label: "紧凑", desc: "一屏显示更多书签" },
+  { key: "mini", label: "极简", desc: "最小卡片，适合大量书签" },
+];
 const BOOKMARK_SITE_ICONS_ENABLED = true;
 const ICON_EDGE_FUNCTION_NAME = "fetch-bookmark-icon";
+const LINK_CHECK_EDGE_FUNCTION_NAME = "check-bookmark-link";
 const STORAGE_ICON_BUCKET = "bookmark-icons";
+
+const PINYIN_PHRASE_ALIASES = new Map(Object.entries({
+  "抖音": "douyin dy", "快手": "kuaishou ks", "小红书": "xiaohongshu xhs", "微博": "weibo wb", "微信": "weixin wx", "知乎": "zhihu zh", "豆瓣": "douban db",
+  "百度": "baidu bd", "谷歌": "google gg", "必应": "bing by", "夸克": "kuake kk", "搜狗": "sougou sg", "神马": "shenma sm",
+  "淘宝": "taobao tb", "天猫": "tianmao tm", "京东": "jingdong jd", "拼多多": "pinduoduo pdd", "闲鱼": "xianyu xy", "美团": "meituan mt", "饿了么": "eleme elm",
+  "腾讯": "tengxun tx", "阿里": "ali al", "网易": "wangyi wy", "搜狐": "souhu sh", "字节": "zijie zj", "飞书": "feishu fs", "钉钉": "dingding dd",
+  "哔哩哔哩": "bilibili blbl bili", "哔哩": "bili bl", "b站": "bilibili bzhan bz", "B站": "bilibili bzhan bz",
+  "苹果": "apple pingguo pg", "微软": "microsoft weiruan wr", "亚马逊": "amazon yamaxun ymx", "脸书": "facebook lianshu ls", "推特": "twitter tuite tt", "油管": "youtube youguan yg",
+  "短信": "duanxin dx", "设备": "shebei sb", "服务": "fuwu fw", "平台": "pingtai pt", "后台": "houtai ht", "系统": "xitong xt", "管理": "guanli gl", "数据": "shuju sj",
+  "代理": "daili dl", "节点": "jiedian jd", "机场": "jichang jc", "飞机": "feiji fj", "网络": "wangluo wl", "工具": "gongju gj", "导航": "daohang dh", "收藏": "shoucang sc", "书签": "shuqian sq",
+  "区块链": "qukuailian qkl", "钱包": "qianbao qb", "交易": "jiaoyi jy", "游戏": "youxi yx", "图片": "tupian tp", "图标": "tubiao tb", "阅读": "yuedu yd", "学习": "xuexi xx", "设计": "sheji sj", "代码": "daima dm", "开发": "kaifa kf", "登录": "denglu dl", "登录页": "dengluye dly"
+}));
+
+const PINYIN_CHAR_MAP = {
+  "一":"yi","乙":"yi","二":"er","三":"san","四":"si","五":"wu","六":"liu","七":"qi","八":"ba","九":"jiu","十":"shi","百":"bai","千":"qian","万":"wan","个":"ge","全":"quan","部":"bu","其":"qi","他":"ta",
+  "阿":"a","啊":"a","爱":"ai","安":"an","按":"an","案":"an","奥":"ao","澳":"ao",
+  "吧":"ba","巴":"ba","把":"ba","白":"bai","版":"ban","办":"ban","半":"ban","包":"bao","宝":"bao","保":"bao","备":"bei","本":"ben","比":"bi","币":"bi","必":"bi","便":"bian","标":"biao","表":"biao","别":"bie","博":"bo","播":"bo","不":"bu","布":"bu",
+  "才":"cai","采":"cai","彩":"cai","菜":"cai","藏":"cang","查":"cha","插":"cha","产":"chan","常":"chang","厂":"chang","长":"chang","超":"chao","车":"che","成":"cheng","程":"cheng","城":"cheng","持":"chi","充":"chong","出":"chu","储":"chu","传":"chuan","创":"chuang","次":"ci","从":"cong","存":"cun","错":"cuo",
+  "大":"da","达":"da","代":"dai","单":"dan","导":"dao","到":"dao","德":"de","登":"deng","等":"deng","地":"di","点":"dian","电":"dian","店":"dian","钉":"ding","定":"ding","动":"dong","东":"dong","抖":"dou","豆":"dou","短":"duan","端":"duan","队":"dui","多":"duo",
+  "饿":"e","发":"fa","法":"fa","返":"fan","方":"fang","防":"fang","访":"fang","飞":"fei","费":"fei","分":"fen","风":"feng","服":"fu","符":"fu","复":"fu","付":"fu","富":"fu",
+  "改":"gai","高":"gao","告":"gao","格":"ge","给":"gei","更":"geng","工":"gong","公":"gong","功":"gong","供":"gong","狗":"gou","购":"gou","谷":"gu","股":"gu","管":"guan","关":"guan","广":"guang","规":"gui","归":"gui","国":"guo",
+  "哈":"ha","海":"hai","号":"hao","好":"hao","合":"he","和":"he","黑":"hei","很":"hen","后":"hou","狐":"hu","互":"hu","花":"hua","画":"hua","换":"huan","回":"hui","会":"hui","火":"huo",
+  "机":"ji","基":"ji","集":"ji","极":"ji","级":"ji","记":"ji","加":"jia","家":"jia","价":"jia","架":"jia","检":"jian","简":"jian","见":"jian","件":"jian","键":"jian","间":"jian","节":"jie","接":"jie","界":"jie","京":"jing","精":"jing","镜":"jing","久":"jiu","具":"ju","据":"ju","局":"ju","剧":"ju","卷":"juan","觉":"jue","决":"jue",
+  "卡":"ka","开":"kai","看":"kan","靠":"kao","科":"ke","可":"ke","客":"ke","空":"kong","口":"kou","快":"kuai","块":"kuai","款":"kuan","况":"kuang","矿":"kuang",
+  "来":"lai","蓝":"lan","栏":"lan","览":"lan","老":"lao","了":"le","类":"lei","里":"li","理":"li","立":"li","链":"lian","联":"lian","脸":"lian","量":"liang","聊":"liao","列":"lie","林":"lin","灵":"ling","领":"ling","浏":"liu","流":"liu","录":"lu","路":"lu","络":"luo",
+  "码":"ma","买":"mai","卖":"mai","猫":"mao","美":"mei","门":"men","密":"mi","名":"ming","明":"ming","模":"mo","目":"mu",
+  "拿":"na","哪":"na","内":"nei","能":"neng","你":"ni","年":"nian","鸟":"niao","牛":"niu","农":"nong","女":"nv",
+  "牌":"pai","排":"pai","盘":"pan","跑":"pao","配":"pei","朋":"peng","批":"pi","片":"pian","频":"pin","苹":"ping","平":"ping","评":"ping","拼":"pin","铺":"pu",
+  "期":"qi","奇":"qi","企":"qi","器":"qi","启":"qi","气":"qi","钱":"qian","前":"qian","签":"qian","强":"qiang","桥":"qiao","切":"qie","清":"qing","情":"qing","区":"qu","取":"qu","趣":"qu","群":"qun",
+  "热":"re","人":"ren","任":"ren","日":"ri","入":"ru","软":"ruan","若":"ruo",
+  "色":"se","删":"shan","商":"shang","上":"shang","设":"she","社":"she","身":"shen","审":"shen","生":"sheng","声":"sheng","省":"sheng","时":"shi","实":"shi","识":"shi","首":"shou","手":"shou","收":"shou","书":"shu","数":"shu","输":"shu","双":"shuang","水":"shui","说":"shuo","搜":"sou","速":"su","算":"suan","随":"sui","索":"suo",
+  "台":"tai","淘":"tao","套":"tao","腾":"teng","提":"ti","体":"ti","天":"tian","条":"tiao","贴":"tie","通":"tong","同":"tong","图":"tu","团":"tuan","推":"tui",
+  "外":"wai","网":"wang","微":"wei","为":"wei","未":"wei","文":"wen","问":"wen","我":"wo","无":"wu","物":"wu",
+  "西":"xi","息":"xi","习":"xi","系":"xi","细":"xi","下":"xia","先":"xian","闲":"xian","显":"xian","线":"xian","箱":"xiang","项":"xiang","像":"xiang","小":"xiao","效":"xiao","消":"xiao","些":"xie","写":"xie","协":"xie","信":"xin","新":"xin","星":"xing","型":"xing","行":"xing","需":"xu","选":"xuan","学":"xue","讯":"xun",
+  "压":"ya","亚":"ya","验":"yan","言":"yan","研":"yan","页":"ye","业":"ye","夜":"ye","易":"yi","已":"yi","以":"yi","义":"yi","音":"yin","应":"ying","用":"yong","优":"you","游":"you","油":"you","有":"you","邮":"you","友":"you","右":"you","于":"yu","语":"yu","域":"yu","预":"yu","源":"yuan","原":"yuan","远":"yuan","月":"yue","阅":"yue","云":"yun","运":"yun",
+  "在":"zai","站":"zhan","账":"zhang","找":"zhao","折":"zhe","这":"zhe","真":"zhen","正":"zheng","支":"zhi","知":"zhi","直":"zhi","置":"zhi","智":"zhi","中":"zhong","种":"zhong","众":"zhong","重":"zhong","周":"zhou","主":"zhu","注":"zhu","专":"zhuan","转":"zhuan","装":"zhuang","资":"zi","字":"zi","自":"zi","总":"zong","组":"zu","左":"zuo","作":"zuo"
+};
+
 
 // 启动稳定性：不要让 Supabase CDN / 数据库慢连接把整个页面卡成空白。
 // 页面会先渲染默认文案和本地缓存，再在后台连接 Supabase 更新数据。
@@ -59,6 +110,9 @@ const BROKEN_ICON_CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
 const MAX_REMOTE_RETRY_DELAY = 30000;
 
 
+// =========================
+// 2. 页面文案配置：页面上能改的文字都集中在这里
+// =========================
 const DEFAULT_TEXT_ROWS = [
   ["brand.title", "我的书签", "左侧顶部网站名称"],
   ["brand.subtitle", "安静、柔和、实时同步", "左侧顶部副标题"],
@@ -205,6 +259,9 @@ const TEXT_GROUP_META = {
   other: { title: "未分类", desc: "未分类文案" }
 };
 
+// =========================
+// 3. Supabase 客户端和页面元素：连接数据库、收集 DOM 节点
+// =========================
 const isConfigured =
   SUPABASE_URL.startsWith("https://") &&
   !SUPABASE_URL.includes("YOUR_PROJECT_ID") &&
@@ -240,6 +297,7 @@ const els = {
 
   loginOpenBtn: $("#loginOpenBtn"),
   logoutBtn: $("#logoutBtn"),
+  adminModeBtn: $("#adminModeBtn"),
   adminBadge: $("#adminBadge"),
   groupOpenBtn: $("#groupOpenBtn"),
   textOpenBtn: $("#textOpenBtn"),
@@ -259,6 +317,11 @@ const els = {
   searchShell: $("#searchShell"),
   searchInput: $("#searchInput"),
   searchScopeTabs: $("#searchScopeTabs"),
+  groupFilterSelect: $("#groupFilterSelect"),
+  groupFilterDropdown: $("#groupFilterDropdown"),
+  groupFilterButton: $("#groupFilterButton"),
+  groupFilterLabel: $("#groupFilterLabel"),
+  groupFilterMenu: $("#groupFilterMenu"),
   searchFeedback: $("#searchFeedback"),
 
   currentTitle: $("#currentTitle"),
@@ -374,6 +437,9 @@ const els = {
   errorDialogFix: $("#errorDialogFix"),
 };
 
+// =========================
+// 4. 页面运行状态：当前分组、登录状态、批量模式、排序模式等
+// =========================
 let bookmarks = [];
 let categories = [];
 let siteTextRows = [];
@@ -394,24 +460,28 @@ let realtimeResumeTimer = null;
 let dataRealtimeTimer = null;
 let dataRefreshInFlight = false;
 let dataRefreshQueued = false;
-let sessionIconFailureCache = new Set();
-let sessionIconSuccessCache = new Map();
-let currentSearchScope = localStorage.getItem("bookmark-search-scope") || DEFAULT_SEARCH_SCOPE;
-if (localStorage.getItem(SEARCH_SCOPE_VERSION_KEY) !== "2") {
-  currentSearchScope = DEFAULT_SEARCH_SCOPE;
-  localStorage.setItem("bookmark-search-scope", DEFAULT_SEARCH_SCOPE);
-  localStorage.setItem(SEARCH_SCOPE_VERSION_KEY, "2");
-}
+let currentSearchScope = DEFAULT_SEARCH_SCOPE;
+localStorage.setItem("bookmark-search-scope", DEFAULT_SEARCH_SCOPE);
+localStorage.setItem(SEARCH_SCOPE_VERSION_KEY, "3");
+let currentCardDensity = normalizeCardDensity(localStorage.getItem(CARD_DENSITY_STORAGE_KEY));
 let bookmarksDataSignature = "";
 let categoriesDataSignature = "";
 let quietRenderTimer = null;
 let pendingImportFile = null;
 let pendingImportPreview = null;
 let activeCardMenuId = null;
+let draggedBookmarkId = null;
+let bookmarkDragSuppressClickUntil = 0;
+let bookmarkSortMode = null;
 let isInitialLoading = true;
 let deletedBookmarksCache = [];
 let remoteRetryCount = 0;
+let mobileNavMounted = false;
+let linkCheckInProgress = false;
 
+// =========================
+// 5. 通用小工具：超时、缓存、转义、URL、数组去重
+// =========================
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -479,6 +549,7 @@ function createSupabaseClient(createClient) {
   });
 }
 
+// 这里负责加载 Supabase SDK；CDN 慢时会换备用源，避免页面卡死。
 async function ensureSupabaseClient(options = {}) {
   const { timeout = SUPABASE_CLIENT_QUICK_TIMEOUT, silent = false } = options;
 
@@ -922,17 +993,14 @@ function normalizeUrl(url) {
   return value;
 }
 
-function getBookmarkIconUrl(url) {
-  return "";
-}
 
-function getAlternateBookmarkIconUrl(url) {
-  return "";
-}
+// 已清理：getBookmarkIconUrl 是旧版本遗留函数，当前流程不再调用。
 
-function getRefreshBookmarkIconUrl(url) {
-  return "";
-}
+
+// 已清理：getAlternateBookmarkIconUrl 是旧版本遗留函数，当前流程不再调用。
+
+
+// 已清理：getRefreshBookmarkIconUrl 是旧版本遗留函数，当前流程不再调用。
 
 function getDefaultCategoryIcon(name = "") {
   const value = String(name || "").toLowerCase();
@@ -1107,8 +1175,8 @@ function getCategoryCheckboxes() {
   return [...els.categoryInput.querySelectorAll('input[name="bookmark-categories"]')];
 }
 
-function ensureCategoryCheckboxOptions() {
-}
+
+// 已清理：ensureCategoryCheckboxOptions 是旧版本遗留函数，当前流程不再调用。
 
 function getSelectedBookmarkCategoryIds() {
   return uniqueIds(
@@ -1118,11 +1186,8 @@ function getSelectedBookmarkCategoryIds() {
   );
 }
 
-function getSelectedBookmarkCategories() {
-  return getSelectedBookmarkCategoryIds()
-    .map((id) => getCategoryById(id)?.name)
-    .filter(Boolean);
-}
+
+// 已清理：getSelectedBookmarkCategories 是旧版本遗留函数，当前流程不再调用。
 
 function setSelectedBookmarkCategoryIds(ids = []) {
   const selected = new Set(uniqueIds(ids));
@@ -1132,9 +1197,8 @@ function setSelectedBookmarkCategoryIds(ids = []) {
   });
 }
 
-function setSelectedBookmarkCategories(names = []) {
-  setSelectedBookmarkCategoryIds(getCategoryIdsByNames(names));
-}
+
+// 已清理：setSelectedBookmarkCategories 是旧版本遗留函数，当前流程不再调用。
 
 function getBookmarkCategoryPayload(categoryIds = []) {
   const firstCategory = uniqueIds(categoryIds)
@@ -1379,6 +1443,9 @@ function getTextRowsForEditor() {
   return [...defaultMap.values()];
 }
 
+// =========================
+// 6. 文案和状态栏：把数据库里的页面文案渲染到页面上
+// =========================
 function applySiteTexts() {
   document.title = t("brand.title");
 
@@ -1456,6 +1523,179 @@ function setRealtimeStatus(status, textValue) {
   }
 }
 
+
+function scrollToTopArea() {
+  const topTarget = document.querySelector(".main") || document.body;
+  topTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setMobileNavCategory(name) {
+  currentCategory = name || "全部";
+  if (els.searchInput) els.searchInput.value = "";
+  closeMobileCategorySheet();
+  render();
+  scrollToTopArea();
+}
+
+function getMobileCategorySheetHtml() {
+  const names = getVisibleCategoryNames();
+
+  return `
+    <div class="mobile-sheet-backdrop" data-mobile-close></div>
+    <section class="mobile-category-sheet" role="dialog" aria-modal="true" aria-label="选择分组">
+      <div class="mobile-sheet-handle" aria-hidden="true"></div>
+      <div class="mobile-sheet-head">
+        <div>
+          <strong>选择分组</strong>
+          <span>快速切换当前书签分类</span>
+        </div>
+        <button type="button" class="mobile-sheet-close" data-mobile-close aria-label="关闭">×</button>
+      </div>
+      <div class="mobile-category-list">
+        ${names.map((name) => {
+          const isAll = name === "全部";
+          const categoryObj = getSortedCategories().find((item) => item.name === name);
+          const active = currentCategory === name;
+          return `
+            <button class="mobile-category-item ${active ? "is-active" : ""}" type="button" data-mobile-category="${escapeAttr(name)}">
+              <span class="mobile-category-icon">${groupIcon(categoryObj?.icon || getDefaultCategoryIcon(name), isAll)}</span>
+              <span class="mobile-category-name">${escapeHtml(isAll ? t("top.allTitle") : name)}</span>
+              <em>${getCategoryCount(name)}</em>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function openMobileCategorySheet() {
+  const sheet = document.getElementById("mobileCategorySheet");
+  if (!sheet) return;
+
+  sheet.innerHTML = getMobileCategorySheetHtml();
+  sheet.classList.add("is-open");
+  document.body.classList.add("mobile-sheet-open");
+}
+
+function closeMobileCategorySheet() {
+  const sheet = document.getElementById("mobileCategorySheet");
+  if (!sheet) return;
+
+  sheet.classList.remove("is-open");
+  document.body.classList.remove("mobile-sheet-open");
+}
+
+function getMobileBottomNavHtml() {
+  const admin = isAdmin();
+  const hasSearch = Boolean(els.searchInput?.value?.trim());
+
+  return `
+    <button type="button" class="mobile-nav-item ${currentCategory === "全部" && !hasSearch ? "is-active" : ""}" data-mobile-action="home" aria-label="回到全部书签">
+      <span>⌂</span><em>首页</em>
+    </button>
+    <button type="button" class="mobile-nav-item ${currentCategory !== "全部" ? "is-active" : ""}" data-mobile-action="categories" aria-label="打开分组">
+      <span>☰</span><em>分组</em>
+    </button>
+    <button type="button" class="mobile-nav-item ${hasSearch ? "is-active" : ""}" data-mobile-action="search" aria-label="搜索书签">
+      <span>⌕</span><em>搜索</em>
+    </button>
+    <button type="button" class="mobile-nav-item ${admin ? "is-admin" : ""}" data-mobile-action="${admin ? "add" : "login"}" aria-label="${admin ? "新增书签" : "管理员登录"}">
+      <span>${admin ? "+" : "◎"}</span><em>${admin ? "新增" : "登录"}</em>
+    </button>
+    <button type="button" class="mobile-nav-item" data-mobile-action="theme" aria-label="切换主题">
+      <span>◐</span><em>主题</em>
+    </button>
+  `;
+}
+
+// =========================
+// 7. 手机端：底部导航和分组抽屉
+// =========================
+function renderMobileBottomNav() {
+  const nav = document.getElementById("mobileBottomNav");
+  if (!nav) return;
+  nav.innerHTML = getMobileBottomNavHtml();
+}
+
+function ensureMobileNavMount() {
+  if (mobileNavMounted) return;
+
+  const nav = document.createElement("nav");
+  nav.id = "mobileBottomNav";
+  nav.className = "mobile-bottom-nav";
+  nav.setAttribute("aria-label", "手机端快捷导航");
+
+  const sheet = document.createElement("div");
+  sheet.id = "mobileCategorySheet";
+  sheet.className = "mobile-category-sheet-wrap";
+
+  document.body.append(nav, sheet);
+  mobileNavMounted = true;
+  renderMobileBottomNav();
+
+  nav.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mobile-action]");
+    if (!button) return;
+
+    const action = button.dataset.mobileAction;
+
+    if (action === "home") {
+      setMobileNavCategory("全部");
+      return;
+    }
+
+    if (action === "categories") {
+      openMobileCategorySheet();
+      return;
+    }
+
+    if (action === "search") {
+      scrollToTopArea();
+      setTimeout(() => {
+        els.searchInput?.focus();
+        els.searchInput?.select();
+      }, 220);
+      return;
+    }
+
+    if (action === "add") {
+      openBookmarkDialog();
+      return;
+    }
+
+    if (action === "login") {
+      els.loginDialog?.showModal();
+      return;
+    }
+
+    if (action === "theme") {
+      toggleTheme();
+    }
+  });
+
+  sheet.addEventListener("click", (event) => {
+    const closeBtn = event.target.closest("[data-mobile-close]");
+    const categoryBtn = event.target.closest("[data-mobile-category]");
+
+    if (closeBtn) {
+      closeMobileCategorySheet();
+      return;
+    }
+
+    if (categoryBtn) {
+      setMobileNavCategory(categoryBtn.dataset.mobileCategory);
+    }
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMobileCategorySheet();
+  });
+}
+
+// =========================
+// 8. 管理员界面：登录后才显示管理按钮，访客看到干净页面
+// =========================
 function updateAdminVisibility() {
   const admin = isAdmin();
   const titlebar = document.querySelector(".titlebar");
@@ -1474,6 +1714,7 @@ function updateAdminVisibility() {
   if (!admin) {
     sidebarEditMode = false;
     batchMode = false;
+    bookmarkSortMode = null;
     selectedBookmarkIds.clear();
   }
 
@@ -1500,9 +1741,37 @@ function updateAdminVisibility() {
   els.importExportBtn?.classList.toggle("hidden", !admin);
   els.trashOpenBtn?.classList.toggle("hidden", !admin);
   els.systemCheckBtn?.classList.toggle("hidden", !admin);
-  els.adminBadge.classList.toggle("hidden", !admin);
-  els.logoutBtn.classList.toggle("hidden", !currentUser);
-  els.loginOpenBtn.classList.toggle("hidden", !!currentUser);
+  updateLinkCheckButtonState();
+
+  const modeText = admin ? "管理员模式" : (currentUser ? "已登录" : t("admin.loginButton"));
+  [els.adminBadge, els.adminModeBtn].forEach((button) => {
+    if (!button) return;
+    button.textContent = modeText;
+    button.classList.remove("hidden");
+    button.classList.toggle("is-admin", admin);
+    button.classList.toggle("is-login", !currentUser);
+    button.title = currentUser ? "当前为管理员模式" : "未登录管理员";
+  });
+
+  if (els.loginOpenBtn) {
+    const topAdminText = currentUser ? "退出" : t("admin.loginButton");
+    els.loginOpenBtn.textContent = topAdminText;
+    els.loginOpenBtn.classList.remove("hidden");
+    els.loginOpenBtn.removeAttribute("aria-hidden");
+    els.loginOpenBtn.removeAttribute("tabindex");
+    els.loginOpenBtn.style.removeProperty("display");
+    els.loginOpenBtn.classList.toggle("is-admin", admin);
+    els.loginOpenBtn.classList.toggle("is-login", !currentUser);
+    els.loginOpenBtn.title = currentUser ? "退出管理员登录" : "登录管理员";
+  }
+
+  if (els.logoutBtn) {
+    els.logoutBtn.classList.add("hidden");
+    els.logoutBtn.setAttribute("aria-hidden", "true");
+    els.logoutBtn.setAttribute("tabindex", "-1");
+    els.logoutBtn.style.setProperty("display", "none", "important");
+  }
+  renderMobileBottomNav();
 }
 
 function setAdminUI(options = {}) {
@@ -1539,6 +1808,14 @@ function exitAdminModes(options = {}) {
   if (batchMode) {
     batchMode = false;
     selectedBookmarkIds.clear();
+    changed = true;
+  }
+
+  if (bookmarkSortMode) {
+    bookmarkSortMode = null;
+    draggedBookmarkId = null;
+    document.body.classList.remove("is-bookmark-dragging");
+    resumeRealtimeSoon(500);
     changed = true;
   }
 
@@ -1579,15 +1856,7 @@ function getSearchScope() {
 }
 
 function getSearchPlaceholder(scope = getSearchScope()) {
-  const placeholders = {
-    all: "搜索全部：名称、简介、链接、分组...",
-    title: "搜索书签名称...",
-    description: "搜索书签简介...",
-    url: "搜索书签链接或域名...",
-    category: "搜索书签分组...",
-  };
-
-  return placeholders[scope] || t("search.placeholder");
+  return "搜索书签名称 / 拼音 / 首字母...";
 }
 
 function updateSearchPlaceholder() {
@@ -1595,16 +1864,90 @@ function updateSearchPlaceholder() {
   els.searchInput.placeholder = getSearchPlaceholder();
 }
 
+// =========================
+// 9. 搜索和筛选：名称搜索、拼音/首字母搜索、分组筛选
+// =========================
 function renderSearchScopeTabs() {
-  if (!els.searchScopeTabs) return;
-
-  els.searchScopeTabs.querySelectorAll("[data-search-scope]").forEach((button) => {
-    const active = button.dataset.searchScope === getSearchScope();
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-
+  currentSearchScope = DEFAULT_SEARCH_SCOPE;
   updateSearchPlaceholder();
+}
+
+function renderGroupFilterSelect() {
+  const visibleNames = getVisibleCategoryNames();
+  if (!visibleNames.includes(currentCategory)) {
+    currentCategory = "全部";
+  }
+
+  const signature = JSON.stringify(visibleNames.map((name) => [name, getCategoryCount(name)]));
+
+  if (els.groupFilterSelect && els.groupFilterSelect.tagName === "SELECT" && els.groupFilterSelect.dataset.signature !== signature) {
+    els.groupFilterSelect.innerHTML = visibleNames.map((name) => {
+      const label = name === "全部" ? "全部分组" : name;
+      const count = getCategoryCount(name);
+      return `<option value="${escapeAttr(name)}">${escapeHtml(label)}（${count}）</option>`;
+    }).join("");
+    els.groupFilterSelect.dataset.signature = signature;
+  }
+
+  if (els.groupFilterSelect) {
+    els.groupFilterSelect.value = currentCategory;
+    els.groupFilterSelect.dataset.signature = signature;
+  }
+
+  if (els.groupFilterMenu && els.groupFilterMenu.dataset.signature !== signature) {
+    els.groupFilterMenu.innerHTML = visibleNames.map((name) => {
+      const label = name === "全部" ? "全部分组" : name;
+      const count = getCategoryCount(name);
+      const active = name === currentCategory;
+      return `
+        <button
+          type="button"
+          class="group-filter-option ${active ? "is-active" : ""}"
+          role="option"
+          aria-selected="${String(active)}"
+          data-group-filter-value="${escapeAttr(name)}"
+        >
+          <span>${escapeHtml(label)}</span>
+          <strong>${count}</strong>
+        </button>
+      `;
+    }).join("");
+    els.groupFilterMenu.dataset.signature = signature;
+  } else if (els.groupFilterMenu) {
+    els.groupFilterMenu.querySelectorAll("[data-group-filter-value]").forEach((button) => {
+      const active = button.dataset.groupFilterValue === currentCategory;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+  }
+
+  const label = currentCategory === "全部" ? "全部分组" : currentCategory;
+  const count = getCategoryCount(currentCategory);
+  if (els.groupFilterLabel) els.groupFilterLabel.textContent = label;
+  els.groupFilterDropdown?.querySelector(".group-filter-count")?.replaceChildren(document.createTextNode(String(count)));
+}
+
+function closeGroupFilterDropdown() {
+  els.groupFilterDropdown?.classList.remove("is-open");
+  els.groupFilterButton?.setAttribute("aria-expanded", "false");
+}
+
+function toggleGroupFilterDropdown() {
+  const open = !els.groupFilterDropdown?.classList.contains("is-open");
+  els.groupFilterDropdown?.classList.toggle("is-open", open);
+  els.groupFilterButton?.setAttribute("aria-expanded", String(open));
+}
+
+function selectGroupFilter(value) {
+  if (bookmarkSortMode) {
+    bookmarkSortMode = null;
+    resumeRealtimeSoon(500);
+  }
+  currentCategory = value || "全部";
+  if (els.groupFilterSelect) els.groupFilterSelect.value = currentCategory;
+  closeGroupFilterDropdown();
+  render();
+  requestAnimationFrame(updateCategoryIndicator);
 }
 
 function setSearchScope(scope, renderAfter = true) {
@@ -1617,30 +1960,174 @@ function setSearchScope(scope, renderAfter = true) {
   if (renderAfter) render();
 }
 
+
+function normalizeSearchToken(value = "") {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function compactSearchToken(value = "") {
+  return normalizeSearchToken(value)
+    .replace(/[^\p{L}\p{N}\u4e00-\u9fff]+/gu, "");
+}
+
+function getSearchTerms() {
+  const raw = String(els.searchInput?.value || "").trim();
+  if (!raw) return [];
+
+  const parts = raw
+    .split(/[\s,，、|/\\]+/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!parts.length && raw) parts.push(raw);
+
+  const seen = new Set();
+  return parts
+    .filter((term) => {
+      const key = normalizeSearchToken(term);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 8);
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function shouldHighlightField(field) {
+  const scope = getSearchScope();
+  if (!els.searchInput?.value?.trim()) return false;
+  if (scope === "all") return true;
+  return scope === field;
+}
+
+function highlightSearchHtml(value = "", field = "all") {
+  const text = String(value ?? "");
+  if (!text) return "";
+  if (!shouldHighlightField(field)) return escapeHtml(text);
+
+  const terms = getSearchTerms()
+    .filter((term) => term.length <= 80)
+    .map(escapeRegExp)
+    .filter(Boolean);
+
+  if (!terms.length) return escapeHtml(text);
+
+  const reg = new RegExp(`(${terms.join("|")})`, "giu");
+  let lastIndex = 0;
+  let output = "";
+  let matched = false;
+
+  text.replace(reg, (match, _group, offset) => {
+    matched = true;
+    output += escapeHtml(text.slice(lastIndex, offset));
+    output += `<mark class="search-hit">${escapeHtml(match)}</mark>`;
+    lastIndex = offset + match.length;
+    return match;
+  });
+
+  if (!matched) return escapeHtml(text);
+  output += escapeHtml(text.slice(lastIndex));
+  return output;
+}
+
+function hasDirectSearchMatch(item = {}) {
+  const rawQuery = normalizeSearchToken(els.searchInput?.value || "");
+  const compactQuery = compactSearchToken(els.searchInput?.value || "");
+  if (!rawQuery && !compactQuery) return false;
+
+  const categories = getBookmarkCategories(item).join(" ");
+  const domain = getBookmarkDomain(item.url);
+  const directText = normalizeSearchToken([item.title, item.description, item.url, domain, categories].join(" "));
+  const directCompact = compactSearchToken([item.title, item.description, item.url, domain, categories].join(" "));
+
+  return Boolean(
+    rawQuery && directText.includes(rawQuery) ||
+    compactQuery && directCompact.includes(compactQuery)
+  );
+}
+
+function getPinyinMatchBadgeHtml(item = {}) {
+  if (!els.searchInput?.value?.trim()) return "";
+  if (hasDirectSearchMatch(item)) return "";
+  return `<span class="search-alias-badge" title="通过拼音或首字母匹配">拼音匹配</span>`;
+}
+
+function getPinyinAliases(value = "") {
+  const text = String(value ?? "");
+  const aliases = new Set();
+  const normalized = normalizeSearchToken(text);
+  const compact = compactSearchToken(text);
+
+  if (normalized) aliases.add(normalized);
+  if (compact) aliases.add(compact);
+
+  for (const [phrase, aliasText] of PINYIN_PHRASE_ALIASES.entries()) {
+    if (!text.includes(phrase)) continue;
+
+    String(aliasText || "")
+      .split(/\s+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+      .forEach((item) => aliases.add(item));
+  }
+
+  const full = [];
+  const initials = [];
+
+  for (const char of Array.from(text)) {
+    const pinyin = PINYIN_CHAR_MAP[char];
+
+    if (pinyin) {
+      full.push(pinyin);
+      initials.push(pinyin[0]);
+      continue;
+    }
+
+    if (/^[a-z0-9]$/i.test(char)) {
+      const lower = char.toLowerCase();
+      full.push(lower);
+      initials.push(lower);
+    }
+  }
+
+  const fullText = full.join("");
+  const initialText = initials.join("");
+
+  if (fullText) aliases.add(fullText);
+  if (initialText) aliases.add(initialText);
+
+  return [...aliases].filter(Boolean).join(" ");
+}
+
+function buildSearchValue(...values) {
+  const raw = values.map((item) => String(item ?? "")).filter(Boolean).join(" ");
+  const aliases = values.map((item) => getPinyinAliases(item)).filter(Boolean).join(" ");
+  return normalizeSearchToken(`${raw} ${aliases}`);
+}
+
 function getBookmarkSearchText(item, scope = getSearchScope()) {
-  const categoriesText = getBookmarkCategories(item).join(" ");
-  const domainText = getBookmarkDomain(item.url);
-
-  const fields = {
-    title: item.title,
-    description: item.description,
-    url: `${item.url || ""} ${domainText}`,
-    category: categoriesText,
-    all: `${item.title || ""} ${item.description || ""} ${item.url || ""} ${domainText} ${categoriesText}`,
-  };
-
-  return String(fields[scope] ?? fields.title ?? "").toLowerCase();
+  return buildSearchValue(item.title);
 }
 
 function getFilteredBookmarks() {
-  const q = els.searchInput.value.trim().toLowerCase();
+  const q = compactSearchToken(els.searchInput.value);
+  const looseQ = normalizeSearchToken(els.searchInput.value);
   const scope = getSearchScope();
 
   return bookmarks.filter((item) => {
     const categoryMatch = currentCategory === "全部" || getBookmarkCategories(item).includes(currentCategory);
     const searchableText = getBookmarkSearchText(item, scope);
+    const searchableCompact = compactSearchToken(searchableText);
 
-    return categoryMatch && (!q || searchableText.includes(q));
+    return categoryMatch && (!q || searchableText.includes(looseQ) || searchableCompact.includes(q));
   });
 }
 
@@ -1668,13 +2155,12 @@ function updateSearchFeedback(filteredCount) {
   els.searchShell.classList.remove("searching", "no-results");
 
   if (!q) {
-    els.searchFeedback.textContent = SEARCH_SCOPE_LABELS[getSearchScope()] || t("search.idle");
+    els.searchFeedback.textContent = currentCategory === "全部" ? "全部分组" : currentCategory;
     return;
   }
 
   if (filteredCount > 0) {
-    const scopeLabel = SEARCH_SCOPE_LABELS[getSearchScope()] || "名称";
-    els.searchFeedback.textContent = `${scopeLabel} · ${t("search.found", { count: filteredCount })}`;
+    els.searchFeedback.textContent = `名称 · ${t("search.found", { count: filteredCount })}`;
     els.searchShell.classList.add("searching");
   } else {
     els.searchFeedback.textContent = t("search.empty");
@@ -1725,9 +2211,9 @@ function openCurrentVisibleBookmarks() {
 
 
 function setBookmarkView(view, persist = true) {
-  const nextView = view === "list" ? "list" : "grid";
+  const nextView = "grid";
 
-  els.bookmarkGrid.classList.toggle("is-list", nextView === "list");
+  els.bookmarkGrid?.classList.remove("is-list");
 
   document.querySelectorAll("[data-view-mode]").forEach((button) => {
     const isActive = button.dataset.viewMode === nextView;
@@ -1738,6 +2224,123 @@ function setBookmarkView(view, persist = true) {
   if (persist) {
     localStorage.setItem("bookmark-view", nextView);
   }
+}
+
+function normalizeCardDensity(value = "") {
+  const key = String(value || "").trim();
+  return CARD_DENSITY_OPTIONS.some((item) => item.key === key) ? key : DEFAULT_CARD_DENSITY;
+}
+
+function getCardDensityMeta(key = currentCardDensity) {
+  return CARD_DENSITY_OPTIONS.find((item) => item.key === normalizeCardDensity(key)) || CARD_DENSITY_OPTIONS[0];
+}
+
+function updateCardDensityControl() {
+  const control = document.getElementById("cardDensityControl");
+  if (!control) return;
+
+  const activeMeta = getCardDensityMeta();
+  const currentLabel = control.querySelector("[data-density-current]");
+  if (currentLabel) currentLabel.textContent = activeMeta.label;
+
+  control.querySelectorAll("[data-card-density]").forEach((button) => {
+    const active = button.dataset.cardDensity === currentCardDensity;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function applyCardDensity(value = currentCardDensity, persist = false) {
+  currentCardDensity = normalizeCardDensity(value);
+  document.body.dataset.cardDensity = currentCardDensity;
+  els.bookmarkGrid?.setAttribute("data-card-density", currentCardDensity);
+  updateCardDensityControl();
+
+  if (persist) {
+    localStorage.setItem(CARD_DENSITY_STORAGE_KEY, currentCardDensity);
+  }
+}
+
+function setCardDensity(value) {
+  const next = normalizeCardDensity(value);
+  applyCardDensity(next, true);
+  const meta = getCardDensityMeta(next);
+  showToast(`已切换为${meta.label}模式`);
+}
+
+function getCardDensityControlHtml() {
+  return `
+    <div class="density-segmented density-segmented-compact" role="group" aria-label="切换卡片密度">
+      ${CARD_DENSITY_OPTIONS.map((item) => `
+        <button
+          type="button"
+          data-card-density="${escapeAttr(item.key)}"
+          class="density-chip ${item.key === currentCardDensity ? "is-active" : ""}"
+          aria-pressed="${String(item.key === currentCardDensity)}"
+          title="${escapeAttr(item.desc)}"
+        >${escapeHtml(item.label)}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function ensureCardDensityControlMount() {
+  let control = document.getElementById("cardDensityControl");
+
+  if (!control) {
+    const panel = document.querySelector(".hero-action-panel");
+    if (!panel) return;
+
+    control = document.createElement("div");
+    control.id = "cardDensityControl";
+    control.className = "top-density-control hero-action-group hero-action-density";
+    const adminGroup = panel.querySelector(".hero-action-admin");
+    panel.insertBefore(control, adminGroup || null);
+  }
+
+  if (!control.innerHTML.trim()) {
+    control.innerHTML = getCardDensityControlHtml();
+  }
+
+  if (control.dataset.bound !== "true") {
+    control.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-card-density]");
+      if (!button) return;
+      setCardDensity(button.dataset.cardDensity);
+    });
+    control.dataset.bound = "true";
+  }
+
+  updateCardDensityControl();
+}
+
+function ensureLinkCheckControlMount() {
+  const adminGroup = document.querySelector(".hero-action-admin");
+  if (!adminGroup || document.getElementById("checkLinkBtn")) return;
+
+  const button = document.createElement("button");
+  button.id = "checkLinkBtn";
+  button.className = "ghost-btn link-check-btn hidden";
+  button.type = "button";
+  button.textContent = "检查链接";
+  button.title = "检测书签是否可以正常访问";
+  adminGroup.insertBefore(button, adminGroup.firstChild);
+  els.checkLinkBtn = button;
+
+  button.addEventListener("click", checkVisibleBookmarkLinks);
+}
+
+function updateLinkCheckButtonState() {
+  const button = els.checkLinkBtn || document.getElementById("checkLinkBtn");
+  if (!button) return;
+
+  button.classList.toggle("hidden", !isAdmin());
+  button.disabled = linkCheckInProgress;
+  button.textContent = linkCheckInProgress ? "检查中..." : "检查链接";
+}
+
+function initCardDensity() {
+  applyCardDensity(currentCardDensity, false);
 }
 
 function updateCategoryIndicator() {
@@ -1751,6 +2354,9 @@ function updateCategoryIndicator() {
   els.groupList.style.setProperty("--active-opacity", "1");
 }
 
+// =========================
+// 10. 页面渲染：左侧分组、书签卡片、分区、空状态
+// =========================
 function groupIcon(iconKey = "paw-cat", isAll = false) {
   const key = isAll ? "all" : normalizeCategoryIcon(iconKey);
 
@@ -1955,7 +2561,8 @@ function renderGroupList() {
   requestAnimationFrame(updateCategoryIndicator);
 }
 
-function renderCard(item, index) {
+// 单张书签卡片的 HTML 都从这里生成。
+function renderCard(item, index, sectionKey = "") {
   const admin = isAdmin();
   const isHighlighted = highlightBookmarkId && String(item.id) === String(highlightBookmarkId);
   const initial = getBookmarkInitial(item.title);
@@ -1967,7 +2574,7 @@ function renderCard(item, index) {
   const categoryChips = visibleCategoryChips.length
     ? `
       <div class="card-groups" aria-label="所属分组">
-        ${visibleCategoryChips.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}
+        ${visibleCategoryChips.map((name) => `<span>${highlightSearchHtml(name, "category")}</span>`).join("")}
         ${hiddenCategoryCount ? `<span>+${hiddenCategoryCount}</span>` : ""}
       </div>
     `
@@ -1983,8 +2590,22 @@ function renderCard(item, index) {
     `
     : "";
 
+  const isSortingCard = Boolean(bookmarkSortMode && bookmarkSortMode.key === sectionKey);
+  const canDragSort = admin && !batchMode && isSortingCard;
+  const dragHandle = canDragSort
+    ? `<button class="card-drag-handle" type="button" draggable="true" data-bookmark-drag="${escapeAttr(item.id)}" aria-label="拖动排序" title="按住拖动排序">⋮⋮</button>`
+    : "";
+  const sortMoveControls = canDragSort
+    ? `
+      <div class="card-sort-controls" aria-label="排序微调">
+        <button type="button" data-sort-move="up" data-sort-id="${escapeAttr(item.id)}" title="上移">↑</button>
+        <button type="button" data-sort-move="down" data-sort-id="${escapeAttr(item.id)}" title="下移">↓</button>
+      </div>
+    `
+    : "";
+
   const isMenuOpen = activeCardMenuId && String(activeCardMenuId) === String(item.id);
-  const adminButtons = admin && !batchMode
+  const adminButtons = admin && !batchMode && !isSortingCard
     ? `
       <div class="card-menu ${isMenuOpen ? "is-open" : ""}">
         <button class="card-menu-toggle" type="button" data-card-menu-toggle="${escapeAttr(item.id)}" aria-label="打开书签菜单" aria-expanded="${String(isMenuOpen)}">•••</button>
@@ -2000,15 +2621,18 @@ function renderCard(item, index) {
     `
     : "";
 
-  const openAttrs = `data-open-url="${escapeAttr(item.url)}" role="link" tabindex="0" aria-label="${escapeAttr(item.title)}"`;
+  const openAttrs = isSortingCard ? `role="listitem" aria-label="${escapeAttr(item.title)}"` : `data-open-url="${escapeAttr(item.url)}" role="link" tabindex="0" aria-label="${escapeAttr(item.title)}"`;
 
   const guestHint = batchMode ? "" : `<div class="guest-hint">${escapeHtml(t("bookmark.openHint"))}</div>`;
   const pinnedBadge = item.is_pinned ? `<span class="pin-badge" title="置顶">★</span>` : "";
+  const matchBadge = getPinyinMatchBadgeHtml(item);
+  const descriptionText = item.description || t("bookmark.emptyDesc");
 
   return `
     <article
-      class="card ${admin ? "admin-card" : "guest-card"} ${batchMode ? "is-batch-mode" : ""} ${item.is_pinned ? "is-pinned" : ""} ${isBatchSelected ? "is-selected" : ""} ${isHighlighted ? "is-new" : ""}"
+      class="card ${admin ? "admin-card" : "guest-card"} ${batchMode ? "is-batch-mode" : ""} ${isSortingCard ? "is-sort-mode" : ""} ${isMenuOpen ? "is-menu-open" : ""} ${item.is_pinned ? "is-pinned" : ""} ${isBatchSelected ? "is-selected" : ""} ${isHighlighted ? "is-new" : ""}"
       data-card-id="${escapeAttr(item.id)}"
+      data-sort-section="${escapeAttr(sectionKey)}"
       style="animation-delay:${Math.min(index * 35, 280)}ms"
       ${openAttrs}
     >
@@ -2016,20 +2640,40 @@ function renderCard(item, index) {
         <span class="card-sheen" aria-hidden="true"></span>
         <div class="card-top">
           ${batchSelector}
+          ${dragHandle}
           ${renderCardLogo(item, initial, logoTextClass)}
           ${pinnedBadge}
           ${adminButtons}
+          ${sortMoveControls}
         </div>
         <div class="card-title-wrap">
-          <h3>${escapeHtml(item.title)}</h3>
-          ${domain ? `<span class="card-domain">${escapeHtml(domain)}</span>` : ""}
+          <h3 class="${getCardTitleFitClass(item.title)}" title="${escapeAttr(item.title)}">${highlightSearchHtml(item.title, "title")}</h3>
+          <div class="card-meta-row">
+            ${domain ? `<span class="card-domain">${highlightSearchHtml(domain, "url")}</span>` : ""}
+            ${matchBadge}
+          </div>
         </div>
-        <p class="card-desc">${escapeHtml(item.description || t("bookmark.emptyDesc"))}</p>
+        <p class="card-desc">${highlightSearchHtml(descriptionText, "description")}</p>
         ${categoryChips}
         ${guestHint}
       </div>
     </article>
   `;
+}
+
+
+function getCardTitleFitClass(title = "") {
+  const text = String(title || "").trim();
+  const chars = Array.from(text);
+  const cjkCount = chars.filter((ch) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch)).length;
+  const asciiCount = Math.max(chars.length - cjkCount, 0);
+  const visualLength = cjkCount * 1.65 + asciiCount;
+
+  if (visualLength >= 34) return "title-fit-xxl";
+  if (visualLength >= 27) return "title-fit-xl";
+  if (visualLength >= 21) return "title-fit-lg";
+  if (visualLength >= 15) return "title-fit-md";
+  return "title-fit-normal";
 }
 
 function renderTextEditor() {
@@ -2115,25 +2759,50 @@ function renderTextEditor() {
 function renderBookmarkSection(title, items, startIndex = 0, variant = "normal", desc = "") {
   if (!items.length) return "";
 
+  const searchText = els.searchInput?.value?.trim?.() || "";
+  const admin = isAdmin();
+  const isSorting = Boolean(bookmarkSortMode && bookmarkSortMode.key === variant);
+  const canSort = admin && !batchMode && !searchText && items.length > 1;
+  const displayItems = applyBookmarkDraftOrder(variant, items);
+  const sortActions = canSort
+    ? isSorting
+      ? `
+        <div class="section-sort-actions">
+          <button class="section-sort-btn is-save" type="button" data-sort-action="save" data-sort-section="${escapeAttr(variant)}">保存排序</button>
+          <button class="section-sort-btn" type="button" data-sort-action="cancel" data-sort-section="${escapeAttr(variant)}">取消</button>
+        </div>
+      `
+      : `
+        <div class="section-sort-actions">
+          <button class="section-sort-btn" type="button" data-sort-action="start" data-sort-section="${escapeAttr(variant)}">整理排序</button>
+        </div>
+      `
+    : "";
+
   return `
-    <section class="bookmark-section bookmark-section-${escapeAttr(variant)}">
+    <section class="bookmark-section bookmark-section-${escapeAttr(variant)} ${isSorting ? "is-sorting" : ""}" data-bookmark-section="${escapeAttr(variant)}">
       <div class="bookmark-section-head">
         <div>
           <strong>${escapeHtml(title)}</strong>
-          ${desc ? `<em>${escapeHtml(desc)}</em>` : ""}
+          ${desc ? `<em>${escapeHtml(isSorting ? "正在本地整理顺序，点击保存后一次性同步。" : desc)}</em>` : ""}
         </div>
-        <span>${items.length} 个</span>
+        <div class="bookmark-section-meta">
+          <span>${items.length} 个</span>
+          ${sortActions}
+        </div>
       </div>
-      <div class="section-grid">
-        ${items.map((item, index) => renderCard(item, startIndex + index)).join("")}
+      <div class="section-grid" role="list">
+        ${displayItems.map((item, index) => renderCard(item, startIndex + index, variant)).join("")}
       </div>
     </section>
   `;
 }
 
+// 页面大刷新入口：分组、卡片、按钮状态都会在这里统一更新。
 function render() {
   renderCategorySelect();
   renderGroupList();
+  renderGroupFilterSelect();
 
   if (isInitialLoading) return;
 
@@ -2144,7 +2813,8 @@ function render() {
     : [];
   const pinnedIds = new Set(pinned.map((item) => String(item.id)));
   const normal = filtered.filter((item) => !pinnedIds.has(String(item.id)));
-  const shouldSection = pinned.length > 0;
+  const admin = isAdmin();
+  const shouldSection = pinned.length > 0 || (admin && !searchText && filtered.length > 0);
 
   updatePageMeta(filtered.length);
   updateSearchFeedback(filtered.length);
@@ -2152,14 +2822,32 @@ function render() {
 
   els.emptyState.classList.toggle("hidden", filtered.length > 0);
   els.bookmarkGrid.classList.toggle("has-sections", shouldSection);
-  els.bookmarkGrid.innerHTML = shouldSection
-    ? [
-        renderBookmarkSection("置顶收藏", pinned, 0, "pinned", "重要链接始终放在最前面"),
-        renderBookmarkSection(currentCategory === "全部" ? "全部收藏" : "普通收藏", normal, pinned.length, "normal", "其余收藏按当前分组展示"),
-      ].join("")
-    : filtered.map((item, index) => renderCard(item, index)).join("");
+  els.bookmarkGrid.classList.toggle("has-pinned-section", pinned.length > 0);
+  els.bookmarkGrid.classList.toggle("no-pinned-section", shouldSection && pinned.length === 0);
+  document.body.classList.toggle("has-pinned-section", pinned.length > 0);
+  document.body.classList.toggle("no-pinned-section", shouldSection && pinned.length === 0);
+  els.bookmarkGrid.classList.toggle("sort-mode-active", Boolean(bookmarkSortMode));
+  document.body.classList.toggle("bookmark-sort-mode-active", Boolean(bookmarkSortMode));
+  if (shouldSection) {
+    const sections = [];
+
+    if (pinned.length > 0) {
+      sections.push(renderBookmarkSection("置顶收藏", pinned, 0, "pinned", "重要链接始终放在最前面"));
+    }
+
+    if (normal.length > 0) {
+      sections.push(renderBookmarkSection(currentCategory === "全部" ? "全部收藏" : "普通收藏", normal, pinned.length, "normal", "其余收藏按当前分组展示"));
+    }
+
+    els.bookmarkGrid.innerHTML = sections.join("");
+  } else {
+    els.bookmarkGrid.innerHTML = filtered.map((item, index) => renderCard(item, index, "normal")).join("");
+  }
 
   updateBatchUI();
+  updateCardDensityControl();
+  updateLinkCheckButtonState();
+  renderMobileBottomNav();
 }
 
 async function updateBookmarkIconCache(bookmarkId, patch = {}, options = {}) {
@@ -2202,6 +2890,9 @@ function activateBookmarkIcons() {
   activateBookmarkIcons.bound = true;
 }
 
+// =========================
+// 11. 图标缓存：前端只读 Storage 图标，抓取交给 Edge Function
+// =========================
 async function fetchBookmarkIconWithEdge(bookmarkId, url, options = {}) {
   const { force = false, debug = true } = options;
 
@@ -2296,16 +2987,8 @@ function getIconRepairAttemptSummary(data = null, limit = 5) {
     .join("；");
 }
 
-function queueBookmarkIconFetch(bookmarkId, url, options = {}) {
-  if (!BOOKMARK_SITE_ICONS_ENABLED || !isAdmin() || !bookmarkId || !url) return;
 
-  setTimeout(async () => {
-    const result = await fetchBookmarkIconWithEdge(bookmarkId, url, options);
-    if (result.error) {
-      console.warn("图标后台修复失败：", result.error);
-    }
-  }, 900);
-}
+// 已清理：queueBookmarkIconFetch 是旧版本遗留函数，当前流程不再调用。
 
 function getIconRepairTargets(mode = "missing") {
   const rows = bookmarks.filter((item) => item?.id && item?.url && item.is_deleted !== true && item.is_active !== false);
@@ -2323,6 +3006,268 @@ function getIconRepairSummary() {
   const missing = rows.filter((item) => !isSupabaseStorageIconUrl(item.icon_url)).length;
 
   return { total: rows.length, ready, missing, failed };
+}
+
+// =========================
+// 12. 书签排序：先本地排序，点保存后一次性写入数据库
+// =========================
+function getSortableBookmarkSections() {
+  const filtered = getFilteredBookmarks();
+  const pinned = filtered.filter((item) => item.is_pinned);
+  const pinnedIds = new Set(pinned.map((item) => String(item.id)));
+  const normal = filtered.filter((item) => !pinnedIds.has(String(item.id)));
+  return { pinned, normal };
+}
+
+function getCurrentSortableItems(sectionKey = "normal") {
+  const sections = getSortableBookmarkSections();
+  return sectionKey === "pinned" ? sections.pinned : sections.normal;
+}
+
+function applyBookmarkDraftOrder(sectionKey, items = []) {
+  if (!bookmarkSortMode || bookmarkSortMode.key !== sectionKey || !Array.isArray(bookmarkSortMode.draftIds)) {
+    return items;
+  }
+
+  const byId = new Map(items.map((item) => [String(item.id), item]));
+  const ordered = bookmarkSortMode.draftIds.map((id) => byId.get(String(id))).filter(Boolean);
+  const remaining = items.filter((item) => !bookmarkSortMode.draftIds.includes(String(item.id)));
+  return [...ordered, ...remaining];
+}
+
+function startBookmarkSortMode(sectionKey = "normal") {
+  if (!isAdmin()) return;
+
+  const searchText = els.searchInput?.value?.trim?.() || "";
+  if (searchText) {
+    showToast("请先清空搜索关键词，再整理排序", "error");
+    return;
+  }
+
+  if (batchMode) {
+    batchMode = false;
+    selectedBookmarkIds.clear();
+  }
+
+  const items = getCurrentSortableItems(sectionKey);
+  const ids = items.map((item) => String(item.id)).filter(Boolean);
+
+  if (ids.length < 2) {
+    showToast("当前区域书签太少，不需要排序");
+    return;
+  }
+
+  closeCardMenus();
+  bookmarkSortMode = {
+    key: sectionKey,
+    originalIds: [...ids],
+    draftIds: [...ids],
+  };
+  pauseRealtime();
+  render();
+  showToast("已进入排序模式，拖动卡片后点击保存");
+}
+
+function cancelBookmarkSortMode() {
+  if (!bookmarkSortMode) return;
+  bookmarkSortMode = null;
+  draggedBookmarkId = null;
+  document.body.classList.remove("is-bookmark-dragging");
+  clearBookmarkDropMarks();
+  resumeRealtimeSoon(500);
+  render();
+  showToast("已取消排序");
+}
+
+// 排序模式保存：拖动时不写数据库，点保存才统一写 sort_order。
+async function saveBookmarkSortMode() {
+  if (!bookmarkSortMode) return;
+
+  const draftIds = [...bookmarkSortMode.draftIds];
+  const sectionKey = bookmarkSortMode.key;
+  bookmarkSortMode = null;
+  draggedBookmarkId = null;
+  document.body.classList.remove("is-bookmark-dragging");
+  clearBookmarkDropMarks();
+
+  const changed = draftIds.join("|") !== getCurrentSortableItems(sectionKey).map((item) => String(item.id)).join("|");
+  if (!changed) {
+    resumeRealtimeSoon(500);
+    render();
+    showToast("顺序没有变化");
+    return;
+  }
+
+  await updateBookmarkSortOrder(draftIds);
+}
+
+function reorderBookmarkDraft(sourceId, targetId, position = "before") {
+  if (!bookmarkSortMode || !sourceId || !targetId || String(sourceId) === String(targetId)) return false;
+
+  const draft = [...bookmarkSortMode.draftIds.map(String)];
+  const fromIndex = draft.indexOf(String(sourceId));
+  const targetIndex = draft.indexOf(String(targetId));
+
+  if (fromIndex < 0 || targetIndex < 0) return false;
+
+  draft.splice(fromIndex, 1);
+  const nextTargetIndex = draft.indexOf(String(targetId));
+  draft.splice(position === "after" ? nextTargetIndex + 1 : nextTargetIndex, 0, String(sourceId));
+
+  bookmarkSortMode = {
+    ...bookmarkSortMode,
+    draftIds: draft,
+  };
+  return true;
+}
+
+function moveBookmarkInDraft(id, direction = "up") {
+  if (!bookmarkSortMode) return;
+
+  const draft = [...bookmarkSortMode.draftIds.map(String)];
+  const index = draft.indexOf(String(id));
+  if (index < 0) return;
+
+  const nextIndex = direction === "down" ? index + 1 : index - 1;
+  if (nextIndex < 0 || nextIndex >= draft.length) return;
+
+  const [moved] = draft.splice(index, 1);
+  draft.splice(nextIndex, 0, moved);
+  bookmarkSortMode = {
+    ...bookmarkSortMode,
+    draftIds: draft,
+  };
+  render();
+}
+
+function clearBookmarkDropMarks() {
+  els.bookmarkGrid?.querySelectorAll(".card.drop-before, .card.drop-after").forEach((card) => {
+    card.classList.remove("drop-before", "drop-after");
+  });
+}
+
+function getBookmarkDragPosition(event, card) {
+  const rect = card.getBoundingClientRect();
+  const sameRowThreshold = rect.height * 0.38;
+  const centerY = rect.top + rect.height / 2;
+
+  if (Math.abs(event.clientY - centerY) < sameRowThreshold) {
+    return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  }
+
+  return event.clientY < centerY ? "before" : "after";
+}
+
+
+// 已清理：getBookmarkOrderContainer 是旧版本遗留函数，当前流程不再调用。
+
+async function updateBookmarkSortOrder(ids = []) {
+  const orderedIds = uniqueIds(ids);
+
+  if (!orderedIds.length || !supabase || !isAdmin()) return false;
+
+  const previous = new Map(bookmarks.map((item) => [String(item.id), Number(item.sort_order ?? 0)]));
+
+  bookmarks = bookmarks.map((item) => {
+    const index = orderedIds.indexOf(String(item.id));
+    if (index < 0) return item;
+    return {
+      ...item,
+      sort_order: (index + 1) * 10,
+    };
+  });
+
+  bookmarksDataSignature = getBookmarksDataSignature(bookmarks);
+  saveAppCache();
+  safeRender(true);
+  pauseRealtime();
+
+  try {
+    for (let index = 0; index < orderedIds.length; index += 1) {
+      const id = orderedIds[index];
+      const nextSort = (index + 1) * 10;
+      const { error } = await supabase
+        .from("bookmarks")
+        .update({ sort_order: nextSort })
+        .eq("id", id);
+
+      if (error) throw error;
+    }
+
+    showToast("书签顺序已保存");
+    await loadAllData({ quiet: true, renderAfter: true });
+    resumeRealtimeSoon(900);
+    return true;
+  } catch (error) {
+    bookmarks = bookmarks.map((item) => {
+      const oldSort = previous.get(String(item.id));
+      return oldSort === undefined ? item : { ...item, sort_order: oldSort };
+    });
+    bookmarksDataSignature = getBookmarksDataSignature(bookmarks);
+    saveAppCache();
+    safeRender(true);
+    resumeRealtimeSoon(900);
+    handleOperationError(error, "书签排序保存失败", "拖拽排序没有保存成功，请确认 bookmarks 表存在 sort_order 字段，并且管理员 RLS 允许更新。", { dialog: true });
+    return false;
+  }
+}
+
+
+// 已清理：reorderBookmarkByDrop 是旧版本遗留函数，当前流程不再调用。
+
+function showIconRepairResultDialog(summary = {}) {
+  const { success = 0, skipped = 0, failures = [], total = 0, label = "图标" } = summary;
+  const failed = failures.length;
+  const completed = success + skipped + failed;
+
+  if (!els.errorDialog) {
+    showToast(`图标修复完成：成功 ${success} 个，失败 ${failed} 个`);
+    return;
+  }
+
+  els.errorDialogTitle.textContent = failed ? "图标修复结果" : "图标修复完成";
+  els.errorDialogMessage.textContent = `${label}处理完成：共 ${total || completed} 个，成功 ${success} 个${skipped ? `，跳过 ${skipped} 个` : ""}${failed ? `，失败 ${failed} 个` : "，失败 0 个"}`;
+
+  const failureHtml = failed
+    ? `
+      <div class="icon-repair-failure-list">
+        ${failures.slice(0, 24).map((item, index) => `
+          <div class="icon-repair-failure">
+            <strong>${index + 1}. ${escapeHtml(item.title || "未命名书签")}</strong>
+            ${item.url ? `<span>${escapeHtml(item.url)}</span>` : ""}
+            <em>${escapeHtml(item.reason || "未知原因")}</em>
+            ${item.attempts ? `<small>${escapeHtml(item.attempts)}</small>` : ""}
+          </div>
+        `).join("")}
+        ${failed > 24 ? `<p class="icon-repair-more">还有 ${failed - 24} 个失败项已省略，可打开控制台查看完整日志。</p>` : ""}
+      </div>
+    `
+    : `<p class="icon-repair-ok">所有可处理图标都已经缓存到 Supabase Storage。</p>`;
+
+  els.errorDialogDetail.innerHTML = `
+    <div class="icon-repair-summary">
+      <div><strong>${success}</strong><span>成功</span></div>
+      <div><strong>${skipped}</strong><span>跳过</span></div>
+      <div><strong>${failed}</strong><span>失败</span></div>
+    </div>
+    ${failureHtml}
+  `;
+  els.errorDialogDetail.classList.remove("hidden");
+
+  els.errorDialogFix.innerHTML = failed
+    ? "自动失败通常是目标网站 403/404、Cloudflare 风控、返回登录页、内部系统或 IP 面板导致的。公开网站可以稍后重试；内部/特殊网站建议在书签菜单里使用 <strong>上传图标</strong> 手动补齐。"
+    : "页面会直接显示 Supabase Storage 缓存图标，不会再请求外部 favicon。";
+  els.errorDialogFix.classList.remove("hidden");
+
+  requestAnimationFrame(() => {
+    try {
+      if (els.errorDialog.open) els.errorDialog.close();
+      els.errorDialog.showModal();
+      els.errorDialog.focus();
+    } catch (error) {
+      showToast(els.errorDialogMessage.textContent || "图标修复完成");
+    }
+  });
 }
 
 async function repairBookmarkIconsSequential(targets = [], options = {}) {
@@ -2370,29 +3315,13 @@ async function repairBookmarkIconsSequential(targets = [], options = {}) {
     resumeRealtimeSoon(1200);
   }
 
-  const failed = failures.length;
-  const message = `图标修复完成：成功 ${success} 个${skipped ? `，跳过 ${skipped} 个` : ""}，失败 ${failed} 个`;
-
-  if (failed) {
-    const detail = failures
-      .slice(0, 18)
-      .map((item, index) => {
-        const attemptText = item.attempts ? `\n   候选失败：${item.attempts}` : "";
-        return `${index + 1}. ${item.title}\n   原因：${item.reason}${attemptText}`;
-      })
-      .join("\n\n");
-
-    const moreText = failed > 18 ? `\n\n还有 ${failed - 18} 个失败项已省略，可在控制台查看完整日志。` : "";
-
-    showErrorDialog(
-      "部分图标没有自动修复成功",
-      message,
-      detail + moreText,
-      "这通常是目标网站 403/404、返回登录页、Cloudflare 风控、内部系统或 IP 面板导致的。公开网站可以稍后重试；内部/特殊网站建议后续使用“手动上传图标”。"
-    );
-  } else {
-    showToast(message);
-  }
+  showIconRepairResultDialog({
+    success,
+    skipped,
+    failures,
+    total: finalTargets.length,
+    label,
+  });
 }
 
 async function repairMissingBookmarkIcons() {
@@ -2568,6 +3497,184 @@ async function uploadBookmarkIcon(id) {
 }
 
 
+function getLinkCheckTargets() {
+  return getFilteredBookmarks()
+    .filter((item) => item?.url)
+    .slice(0, 150);
+}
+
+function getLinkStatusMeta(result = {}) {
+  const status = String(result.status || "unknown");
+  const httpStatus = Number(result.http_status || 0);
+
+  if (status === "ok") return { label: "正常", level: "ok" };
+  if (status === "redirect") return { label: "跳转", level: "ok" };
+  if (status === "blocked" || httpStatus === 401 || httpStatus === 403) return { label: "受限", level: "warn" };
+  if (status === "not_found" || httpStatus === 404 || httpStatus === 410) return { label: "失效", level: "bad" };
+  if (status === "timeout") return { label: "超时", level: "bad" };
+  if (status === "network_error") return { label: "网络错误", level: "bad" };
+  return { label: "未知", level: "warn" };
+}
+
+function getLinkCheckMessage(result = {}) {
+  const status = Number(result.http_status || 0);
+  const statusText = result.status_text ? ` ${result.status_text}` : "";
+  const error = result.error ? String(result.error) : "";
+  const finalUrl = result.final_url && result.final_url !== result.url ? ` → ${result.final_url}` : "";
+
+  if (status) return `HTTP ${status}${statusText}${finalUrl}`;
+  return error || "没有返回有效状态";
+}
+
+async function invokeLinkCheck(item) {
+  const response = await withTimeout(
+    supabase.functions.invoke(LINK_CHECK_EDGE_FUNCTION_NAME, {
+      body: {
+        bookmark_id: item.id,
+        title: item.title,
+        url: item.url,
+      },
+    }),
+    26000,
+    "检查链接"
+  );
+
+  if (response.error) {
+    return {
+      bookmark_id: item.id,
+      title: item.title,
+      url: item.url,
+      status: "network_error",
+      error: response.error.message || getReadableError(response.error),
+    };
+  }
+
+  return {
+    bookmark_id: item.id,
+    title: item.title,
+    url: item.url,
+    ...(response.data || {}),
+  };
+}
+
+function showLinkCheckResultDialog(results = []) {
+  const ok = results.filter((item) => getLinkStatusMeta(item).level === "ok");
+  const warn = results.filter((item) => getLinkStatusMeta(item).level === "warn");
+  const bad = results.filter((item) => getLinkStatusMeta(item).level === "bad");
+  const problemItems = [...bad, ...warn].slice(0, 40);
+
+  if (!els.errorDialog) {
+    showToast(`检查完成：正常 ${ok.length}，异常 ${bad.length}，受限 ${warn.length}`);
+    return;
+  }
+
+  els.errorDialogTitle.textContent = bad.length ? "链接检查完成" : "链接状态良好";
+  els.errorDialogMessage.textContent = `共检查 ${results.length} 个书签：正常/跳转 ${ok.length} 个，受限 ${warn.length} 个，可能失效 ${bad.length} 个。`;
+
+  const rows = problemItems.map((item) => {
+    const meta = getLinkStatusMeta(item);
+    return `
+      <div class="link-check-row link-check-${escapeAttr(meta.level)}">
+        <div class="link-check-main">
+          <strong>${escapeHtml(item.title || "未命名书签")}</strong>
+          <span>${escapeHtml(item.url || "")}</span>
+        </div>
+        <div class="link-check-status">
+          <em>${escapeHtml(meta.label)}</em>
+          <small>${escapeHtml(getLinkCheckMessage(item))}</small>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  els.errorDialogDetail.innerHTML = `
+    <div class="link-check-summary-grid">
+      <div><strong>${ok.length}</strong><span>正常 / 跳转</span></div>
+      <div><strong>${warn.length}</strong><span>受限</span></div>
+      <div><strong>${bad.length}</strong><span>可能失效</span></div>
+    </div>
+    ${problemItems.length ? `<div class="link-check-list">${rows}</div>` : `<p class="link-check-empty">没有发现明显失效链接。</p>`}
+  `;
+  els.errorDialogDetail.classList.remove("hidden");
+
+  els.errorDialogFix.innerHTML = bad.length
+    ? "404 / 410 / 超时通常需要手动检查或删除；403 / 401 多数是网站限制服务器访问，不一定真的失效。"
+    : "当前检测结果正常。部分网站可能会限制服务器检测，实际仍以浏览器打开为准。";
+  els.errorDialogFix.classList.remove("hidden");
+
+  requestAnimationFrame(() => {
+    try {
+      if (els.errorDialog.open) els.errorDialog.close();
+      els.errorDialog.showModal();
+      els.errorDialog.focus();
+    } catch {
+      showToast(els.errorDialogMessage.textContent || "链接检查完成");
+    }
+  });
+}
+
+// =========================
+// 13. 链接检测：通过 Edge Function 检查当前可见书签
+// =========================
+async function checkVisibleBookmarkLinks() {
+  if (!isAdmin()) {
+    showToast(t("toast.noPermission"), "error");
+    return;
+  }
+
+  if (!supabase) {
+    const client = await ensureSupabaseClient({ timeout: SUPABASE_CLIENT_QUICK_TIMEOUT, silent: true });
+    if (!client) {
+      showToast("连接 Supabase 失败", "error");
+      return;
+    }
+  }
+
+  const targets = getLinkCheckTargets();
+  if (!targets.length) {
+    showToast("当前没有可以检查的链接", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(`准备检查当前范围内 ${targets.length} 个链接。\n\n检测会逐个调用 Supabase Edge Function，不会在前端直接请求目标网站。是否继续？`);
+  if (!confirmed) return;
+
+  linkCheckInProgress = true;
+  updateLinkCheckButtonState();
+  showToast(`开始检查 ${targets.length} 个链接...`);
+
+  const results = [];
+
+  try {
+    for (let index = 0; index < targets.length; index += 1) {
+      const item = targets[index];
+      const button = els.checkLinkBtn || document.getElementById("checkLinkBtn");
+      if (button) button.textContent = `检查 ${index + 1}/${targets.length}`;
+
+      try {
+        const result = await invokeLinkCheck(item);
+        results.push(result);
+      } catch (error) {
+        results.push({
+          bookmark_id: item.id,
+          title: item.title,
+          url: item.url,
+          status: "network_error",
+          error: getReadableError(error),
+        });
+      }
+
+      await wait(280);
+    }
+  } finally {
+    linkCheckInProgress = false;
+    updateLinkCheckButtonState();
+  }
+
+  showLinkCheckResultDialog(results);
+}
+
+
 function getSelectedBookmarks() {
   const selected = new Set([...selectedBookmarkIds].map(String));
   return bookmarks.filter((item) => selected.has(String(item.id)));
@@ -2578,6 +3685,9 @@ function pruneBatchSelection() {
   selectedBookmarkIds = new Set([...selectedBookmarkIds].filter((id) => existingIds.has(String(id))));
 }
 
+// =========================
+// 14. 批量管理：批量分组、置顶、删除、导出
+// =========================
 function updateBatchUI() {
   pruneBatchSelection();
 
@@ -2622,6 +3732,11 @@ function setBatchMode(nextValue) {
   if (!isAdmin()) return;
 
   batchMode = Boolean(nextValue);
+
+  if (batchMode && bookmarkSortMode) {
+    bookmarkSortMode = null;
+    resumeRealtimeSoon(500);
+  }
 
   if (!batchMode) {
     selectedBookmarkIds.clear();
@@ -3517,11 +4632,12 @@ async function importPreparedBookmarks() {
   showToast(`已导入 ${createdCount} 个书签`);
 }
 
-async function importBookmarksFromFile(file) {
-  pendingImportFile = file;
-  await prepareImportPreview();
-}
 
+// 已清理：importBookmarksFromFile 是旧版本遗留函数，当前流程不再调用。
+
+// =========================
+// 15. 导入导出：JSON / CSV / 浏览器书签 HTML
+// =========================
 function openImportExportDialog() {
   if (!isAdmin()) {
     showToast(t("toast.noPermission"), "error");
@@ -3607,6 +4723,9 @@ async function openTextDialog() {
   els.textDialog.showModal();
 }
 
+// =========================
+// 16. 数据读取：文案、用户会话、书签、分组、关联表
+// =========================
 async function loadSiteTexts() {
   const allDefaults = getDefaultTextObjects();
   const defaultTextMap = new Map(allDefaults.map((row) => [row.key, row.value]));
@@ -3870,6 +4989,7 @@ async function loadBookmarks(options = {}) {
     "description",
     "category",
     "is_active",
+    "sort_order",
     "created_at",
   ].join(",");
 
@@ -3883,6 +5003,7 @@ async function loadBookmarks(options = {}) {
       .select(enhancedSelect)
       .eq("is_active", true)
       .or("is_deleted.is.null,is_deleted.eq.false")
+      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false }),
     "读取书签"
   );
@@ -3982,6 +5103,7 @@ async function loadBookmarks(options = {}) {
         icon_checked_at: item.icon_checked_at || null,
         icon_storage_path: item.icon_storage_path || null,
         is_pinned: Boolean(item.is_pinned),
+        sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
         is_deleted: Boolean(item.is_deleted),
         deleted_at: item.deleted_at || null,
         category_ids: uniqueIds(linkedCategories.map((category) => category.id).filter(Boolean)),
@@ -3991,6 +5113,11 @@ async function loadBookmarks(options = {}) {
       const pa = a.is_pinned ? 1 : 0;
       const pb = b.is_pinned ? 1 : 0;
       if (pa !== pb) return pb - pa;
+
+      const sa = Number(a.sort_order ?? 0);
+      const sb = Number(b.sort_order ?? 0);
+      if (sa !== sb) return sa - sb;
+
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
 
@@ -4143,6 +5270,7 @@ function normalizeBookmarkRows(rawRows = [], linkRows = [], categoryRows = categ
         icon_checked_at: item.icon_checked_at || null,
         icon_storage_path: item.icon_storage_path || null,
         is_pinned: Boolean(item.is_pinned),
+        sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
         is_deleted: Boolean(item.is_deleted),
         deleted_at: item.deleted_at || null,
         category_ids: uniqueIds(linkedCategories.map((category) => category.id).filter(Boolean)),
@@ -4153,6 +5281,11 @@ function normalizeBookmarkRows(rawRows = [], linkRows = [], categoryRows = categ
       const pa = a.is_pinned ? 1 : 0;
       const pb = b.is_pinned ? 1 : 0;
       if (pa !== pb) return pb - pa;
+
+      const sa = Number(a.sort_order ?? 0);
+      const sb = Number(b.sort_order ?? 0);
+      if (sa !== sb) return sa - sb;
+
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
 }
@@ -4189,9 +5322,10 @@ async function queryBookmarkRowsFast() {
   let result = await runSupabaseQuery(
     supabase
       .from("bookmarks")
-      .select("id,title,url,description,category,is_pinned,is_deleted,deleted_at,is_active,created_at,icon_url,icon_status,icon_checked_at,icon_storage_path")
+      .select("id,title,url,description,category,is_pinned,is_deleted,deleted_at,is_active,sort_order,created_at,icon_url,icon_status,icon_checked_at,icon_storage_path")
       .eq("is_active", true)
       .or("is_deleted.is.null,is_deleted.eq.false")
+      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false }),
     "读取书签",
     DB_REQUEST_TIMEOUT
@@ -4229,6 +5363,7 @@ async function queryBookmarkLinksFast() {
   return result;
 }
 
+// 一次性读取书签、分组、关联关系；读取慢时会优先显示缓存。
 async function loadAllData(options = {}) {
   const { quiet = true, renderAfter = true } = options;
 
@@ -4363,6 +5498,9 @@ function subscribeRealtime() {
   realtimeChannels = [realtimeChannel];
 }
 
+// =========================
+// 17. 数据写入：新增/编辑/删除书签、回收站、分组
+// =========================
 async function saveBookmark() {
   if (!supabase || !isAdmin()) {
     showToast(t("toast.noPermission"), "error");
@@ -4393,6 +5531,11 @@ async function saveBookmark() {
     deleted_at: null,
     is_active: true,
   };
+
+  if (!id) {
+    const maxSort = Math.max(0, ...bookmarks.map((item) => Number(item.sort_order ?? 0)).filter(Number.isFinite));
+    payload.sort_order = maxSort + 10;
+  }
 
   if (urlChanged) {
     Object.assign(payload, {
@@ -4809,6 +5952,9 @@ async function reorderCategories(dragId, targetId, position = "after") {
   await persistCategoryOrder();
 }
 
+// =========================
+// 18. 登录和主题：管理员登录、退出、日/月模式切换
+// =========================
 async function login(event) {
   event.preventDefault();
 
@@ -4971,16 +6117,31 @@ function handleGlobalShortcuts(event) {
   }
 }
 
+// =========================
+// 19. 事件绑定：所有按钮、快捷键、拖拽、弹窗入口集中在这里
+// =========================
 function bindEvents() {
   localStorage.removeItem("bookmark-view");
   setBookmarkView("grid", false);
   activateBookmarkIcons();
+  ensureCardDensityControlMount();
+  ensureLinkCheckControlMount();
+  ensureMobileNavMount();
 
   window.addEventListener("keydown", handleGlobalShortcuts);
 
-  els.loginOpenBtn.addEventListener("click", () => {
-    els.loginDialog.showModal();
-  });
+  const openLoginDialog = () => els.loginDialog.showModal();
+  const handleAdminModeClick = async () => {
+    if (currentUser) {
+      await logout();
+      return;
+    }
+    openLoginDialog();
+  };
+
+  els.loginOpenBtn?.addEventListener("click", handleAdminModeClick);
+  els.adminBadge?.addEventListener("click", handleAdminModeClick);
+  els.adminModeBtn?.addEventListener("click", handleAdminModeClick);
 
   els.textOpenBtn.addEventListener("click", openTextDialog);
   els.groupOpenBtn?.addEventListener("click", openCurrentVisibleBookmarks);
@@ -5017,7 +6178,7 @@ function bindEvents() {
   els.batchRefreshIconBtn?.addEventListener("click", batchRefreshIcons);
   els.batchExportBtn?.addEventListener("click", exportSelectedBookmarks);
   els.batchDeleteBtn?.addEventListener("click", batchDeleteSelectedBookmarks);
-  els.logoutBtn.addEventListener("click", logout);
+  els.logoutBtn?.addEventListener("click", logout);
   els.themeToggle.addEventListener("click", toggleTheme);
 
   els.addOpenBtn.addEventListener("click", () => {
@@ -5084,7 +6245,32 @@ function bindEvents() {
     els.importRunBtn.classList.remove("is-loading");
   });
 
-  els.searchInput.addEventListener("input", render);
+  els.searchInput.addEventListener("input", () => {
+    if (bookmarkSortMode) {
+      bookmarkSortMode = null;
+      resumeRealtimeSoon(500);
+    }
+    render();
+  });
+  els.groupFilterSelect?.addEventListener("change", () => {
+    selectGroupFilter(els.groupFilterSelect.value || "全部");
+  });
+  els.groupFilterButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleGroupFilterDropdown();
+  });
+  els.groupFilterMenu?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-group-filter-value]");
+    if (!option) return;
+    selectGroupFilter(option.dataset.groupFilterValue || "全部");
+  });
+  document.addEventListener("click", (event) => {
+    if (!els.groupFilterDropdown || els.groupFilterDropdown.contains(event.target)) return;
+    closeGroupFilterDropdown();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeGroupFilterDropdown();
+  });
   els.searchScopeTabs?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-search-scope]");
     if (!button) return;
@@ -5179,6 +6365,63 @@ function bindEvents() {
     await reorderCategories(draggedCategoryId, row.dataset.categoryId, position);
   });
 
+  els.bookmarkGrid.addEventListener("dragstart", (event) => {
+    if (!isAdmin() || batchMode || !bookmarkSortMode) return;
+
+    const handle = event.target.closest("[data-bookmark-drag]");
+    const card = handle?.closest?.(".card[data-card-id]");
+
+    if (!handle || !card || card.dataset.sortSection !== bookmarkSortMode.key) return;
+
+    draggedBookmarkId = String(card.dataset.cardId);
+    card.classList.add("dragging");
+    document.body.classList.add("is-bookmark-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedBookmarkId);
+    closeCardMenus();
+  });
+
+  els.bookmarkGrid.addEventListener("dragend", (event) => {
+    const card = event.target.closest(".card[data-card-id]") || els.bookmarkGrid.querySelector(".card.dragging");
+    card?.classList.remove("dragging");
+    draggedBookmarkId = null;
+    bookmarkDragSuppressClickUntil = Date.now() + 420;
+    document.body.classList.remove("is-bookmark-dragging");
+    clearBookmarkDropMarks();
+  });
+
+  els.bookmarkGrid.addEventListener("dragover", (event) => {
+    if (!isAdmin() || !draggedBookmarkId || batchMode || !bookmarkSortMode) return;
+
+    const card = event.target.closest(".card[data-card-id]");
+    if (!card || String(card.dataset.cardId) === String(draggedBookmarkId) || card.dataset.sortSection !== bookmarkSortMode.key) return;
+
+    event.preventDefault();
+    clearBookmarkDropMarks();
+
+    const position = getBookmarkDragPosition(event, card);
+    card.classList.add(position === "before" ? "drop-before" : "drop-after");
+  });
+
+  els.bookmarkGrid.addEventListener("drop", (event) => {
+    if (!isAdmin() || !draggedBookmarkId || batchMode || !bookmarkSortMode) return;
+
+    const card = event.target.closest(".card[data-card-id]");
+    if (!card || String(card.dataset.cardId) === String(draggedBookmarkId) || card.dataset.sortSection !== bookmarkSortMode.key) return;
+
+    event.preventDefault();
+    const position = card.classList.contains("drop-after") ? "after" : "before";
+    const sourceId = String(draggedBookmarkId);
+    clearBookmarkDropMarks();
+    draggedBookmarkId = null;
+    bookmarkDragSuppressClickUntil = Date.now() + 420;
+    document.body.classList.remove("is-bookmark-dragging");
+
+    if (reorderBookmarkDraft(sourceId, card.dataset.cardId, position)) {
+      render();
+    }
+  });
+
   els.bookmarkGrid.addEventListener("mousemove", (event) => {
     const card = event.target.closest(".card");
 
@@ -5207,6 +6450,39 @@ function bindEvents() {
   });
 
   els.bookmarkGrid.addEventListener("click", async (event) => {
+    if (Date.now() < bookmarkDragSuppressClickUntil) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    const sortActionBtn = event.target.closest("[data-sort-action]");
+    if (sortActionBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const action = sortActionBtn.dataset.sortAction;
+      const sectionKey = sortActionBtn.dataset.sortSection || "normal";
+      if (action === "start") startBookmarkSortMode(sectionKey);
+      if (action === "cancel") cancelBookmarkSortMode();
+      if (action === "save") await saveBookmarkSortMode();
+      return;
+    }
+
+    const sortMoveBtn = event.target.closest("[data-sort-move]");
+    if (sortMoveBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveBookmarkInDraft(sortMoveBtn.dataset.sortId, sortMoveBtn.dataset.sortMove);
+      return;
+    }
+
+    const dragHandle = event.target.closest("[data-bookmark-drag]");
+    if (dragHandle) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     const batchInput = event.target.closest("[data-batch-check]");
     const batchCard = event.target.closest(".card[data-card-id]");
 
@@ -5289,6 +6565,12 @@ function bindEvents() {
       closeCardMenus();
 
       await deleteBookmark(deleteBtn.dataset.delete);
+      return;
+    }
+
+    if (bookmarkSortMode && card) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
@@ -5383,8 +6665,12 @@ async function initLottieAnimations() {
   ]);
 }
 
+// =========================
+// 20. 启动入口：先渲染，再后台连接 Supabase，避免页面空白
+// =========================
 async function init() {
   initTheme();
+  initCardDensity();
   applySiteTexts();
   renderLoadingSkeleton();
   bindEvents();
